@@ -1,4 +1,4 @@
-# avarouter
+# AvaRouter
 
 ![logo](logo.png)
 
