@@ -44,11 +44,13 @@ const (
 
 // Entry kinds in wallet.jsonl. Append-only.
 const (
-	entryUserRegister = "user_register"
-	entryCredit       = "credit"
-	entryDebit        = "debit"
-	entryKeyIssue     = "key_issue"
-	entryKeyRevoke    = "key_revoke"
+	entryUserRegister   = "user_register"
+	entryCredit         = "credit"
+	entryDebit          = "debit"
+	entryKeyIssue       = "key_issue"
+	entryKeyRevoke      = "key_revoke"
+	entrySessionCreate  = "session_create"
+	entrySessionRevoke  = "session_revoke"
 )
 
 // Entry is one line in wallet.jsonl.
@@ -57,15 +59,21 @@ const (
 // set on `user_register` entries; the rest inherit PayTo from the
 // user record in memory.
 type Entry struct {
-	At      time.Time `json:"at"`
-	Kind    string    `json:"kind"`
-	Addr    string    `json:"addr"`
-	PayTo   string    `json:"payTo,omitempty"`
-	Amount  int64     `json:"amount,omitempty"`
-	KeyHash string    `json:"keyHash,omitempty"`
-	KeyMeta string    `json:"keyMeta,omitempty"`
-	Note    string    `json:"note,omitempty"`
-	TxHash  string    `json:"txHash,omitempty"`
+	At        time.Time `json:"at"`
+	Kind      string    `json:"kind"`
+	Addr      string    `json:"addr"`
+	PayTo     string    `json:"payTo,omitempty"`
+	Amount    int64     `json:"amount,omitempty"`
+	KeyHash   string    `json:"keyHash,omitempty"`
+	KeyMeta   string    `json:"keyMeta,omitempty"`
+	Note      string    `json:"note,omitempty"`
+	TxHash    string    `json:"txHash,omitempty"`
+	// Session fields (only used for session_create / session_revoke).
+	SessionID    string    `json:"sessionId,omitempty"`
+	SessionHint  string    `json:"sessionHint,omitempty"`
+	SessionExp   time.Time `json:"sessionExpiresAt,omitempty"`
+	SessionLast  time.Time `json:"sessionLastSeen,omitempty"`
+	SessionIdle  time.Time `json:"sessionIdleExpiry,omitempty"`
 }
 
 // KeyMeta is what we expose for /v1/keys (never includes the key
@@ -90,11 +98,12 @@ type UserSnapshot struct {
 
 // Wallet is the multi-tenant ledger. Safe for concurrent use.
 type Wallet struct {
-	mu      sync.Mutex
-	logPath string
-	out     io.Writer
-	users   map[string]*userAccount // from → user
-	keys    map[string]*keyRecord   // keyHash → record (with owner)
+	mu       sync.Mutex
+	logPath  string
+	out      io.Writer
+	users    map[string]*userAccount // from → user
+	keys     map[string]*keyRecord   // keyHash → record (with owner)
+	sessions *SessionStore           // SIWE-style bearer tokens
 }
 
 type userAccount struct {
@@ -123,6 +132,10 @@ func NewWallet(logPath string) (*Wallet, error) {
 		keys:    make(map[string]*keyRecord),
 		logPath: logPath,
 	}
+	// Session store: persists via the same wallet.jsonl. We need
+	// a stable clock function (time.Now) and a persist callback
+	// that appends to w.out (set later, if logPath is non-empty).
+	w.sessions = NewSessionStore(nil)
 	if logPath == "" {
 		return w, nil
 	}
@@ -134,6 +147,55 @@ func NewWallet(logPath string) (*Wallet, error) {
 		return nil, fmt.Errorf("wallet: open log: %w", err)
 	}
 	w.out = f
+	// Now wire the session persist callback.
+	w.sessions.out = func(kind string, body []byte) error {
+		var e Entry
+		e.Kind = kind
+		switch kind {
+		case entrySessionCreate:
+			// body is the JSON we synthesized; parse minimally
+			// to populate Entry fields. body looks like:
+			//   {"id":"<sha256hex>","user":"0x...","hint":"ags_xxx",
+			//    "expiresAt":"...","created":"...","lastSeen":"...","idleExpiry":"..."}
+			var p struct {
+				ID         string `json:"id"`
+				User       string `json:"user"`
+				Hint       string `json:"hint"`
+				ExpiresAt  string `json:"expiresAt"`
+				Created    string `json:"created"`
+				LastSeen   string `json:"lastSeen"`
+				IdleExpiry string `json:"idleExpiry"`
+			}
+			_ = json.Unmarshal(body, &p)
+			e.Addr = p.User
+			e.SessionID = p.ID // sha256(token) — used to look up on restart
+			e.SessionHint = p.Hint
+			if t, err := time.Parse(time.RFC3339Nano, p.ExpiresAt); err == nil {
+				e.SessionExp = t
+			}
+			if t, err := time.Parse(time.RFC3339Nano, p.Created); err == nil {
+				e.At = t
+			}
+			if t, err := time.Parse(time.RFC3339Nano, p.LastSeen); err == nil {
+				e.SessionLast = t
+			}
+			if t, err := time.Parse(time.RFC3339Nano, p.IdleExpiry); err == nil {
+				e.SessionIdle = t
+			}
+		case entrySessionRevoke:
+			// body: {"id":"<sha256hex>","user":"...","hint":"..."}
+			var p struct {
+				ID   string `json:"id"`
+				User string `json:"user"`
+				Hint string `json:"hint"`
+			}
+			_ = json.Unmarshal(body, &p)
+			e.SessionID = p.ID // sha256(token) — must match create entry
+			e.Addr = p.User
+			e.SessionHint = p.Hint
+		}
+		return w.append(e)
+	}
 	if err := w.replay(); err != nil {
 		f.Close()
 		return nil, err
@@ -240,6 +302,13 @@ func (w *Wallet) HasUser(from string) bool {
 	defer w.mu.Unlock()
 	_, ok := w.users[fromN]
 	return ok
+}
+
+// Sessions returns the session store, for token validation /
+// creation / revocation. The store is shared with the wallet's
+// persistence layer, so sessions are durable across restarts.
+func (w *Wallet) Sessions() *SessionStore {
+	return w.sessions
 }
 
 // Snapshot returns balance + timestamp for one user.
@@ -552,6 +621,7 @@ func (w *Wallet) replay() error {
 		}
 		return fmt.Errorf("wallet: read log: %w", err)
 	}
+	var replay []SessionReplayEntry
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -600,7 +670,22 @@ func (w *Wallet) replay() error {
 			if r, ok := w.keys[e.KeyHash]; ok {
 				r.active = false
 			}
+		case entrySessionCreate, entrySessionRevoke:
+			replay = append(replay, SessionReplayEntry{
+				Kind:       e.Kind,
+				ID:         e.SessionID,
+				User:       e.Addr,
+				Hint:       e.SessionHint,
+				Created:    e.At,
+				ExpiresAt:  e.SessionExp,
+				LastSeen:   e.SessionLast,
+				IdleExpiry: e.SessionIdle,
+			})
 		}
+	}
+	// Rebuild the session table from the collected entries.
+	if w.sessions != nil && len(replay) > 0 {
+		w.sessions.Replay(replay)
 	}
 	return nil
 }

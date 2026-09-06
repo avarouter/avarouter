@@ -74,18 +74,70 @@ const ManageSignatureWindow = 5 * time.Minute
 // signed string so future format changes can be detected.
 const ManageAuthVersion = "AGW-MANAGE-v1"
 
-// verifyManagementSignature reads X-Payer / X-AGW-Timestamp /
+// verifyManagementSignature authenticates a management request.
+// It accepts EITHER:
+//
+//   1. A per-request EIP-191 signature (X-Payer + X-AGW-Timestamp
+//      + X-AGW-Signature) — the strict, no-state option.
+//
+//   2. A bearer session token (X-AGW-Session) — proves the user
+//      previously signed an /v1/auth challenge; faster for
+//      repeated management calls.
+//
+// requireRegistered: if true, the authenticated user must be in
+// the wallet's user list. /v1/topup passes false (the signature IS
+// the registration); /v1/keys passes true.
+//
+// On success: returns the normalized user address.
+// On failure: writes a 401 response and returns "".
+func (p *Proxy) verifyManagementSignature(w http.ResponseWriter, r *http.Request, requireRegistered bool) string {
+	// Path 2: bearer session token.
+	if tok := strings.TrimSpace(r.Header.Get("X-AGW-Session")); tok != "" {
+		return p.verifySessionToken(w, r, tok, requireRegistered)
+	}
+	// Path 1: per-request EIP-191 signature.
+	return p.verifySignedRequest(w, r, requireRegistered)
+}
+
+// verifySessionToken validates X-AGW-Session against the wallet's
+// session store. The X-Payer header must match the session's user
+// (defence in depth: a leaked token from one user doesn't grant
+// access to a different user's account even if headers are mixed).
+func (p *Proxy) verifySessionToken(w http.ResponseWriter, r *http.Request, tok string, requireRegistered bool) string {
+	if p.Wallet == nil || p.Wallet.Sessions() == nil {
+		writeAuthError(w, "session store not initialized")
+		return ""
+	}
+	rec, err := p.Wallet.Sessions().Lookup(tok)
+	if err != nil {
+		switch err {
+		case ErrSessionNotFound:
+			writeAuthError(w, "X-AGW-Session unknown or revoked")
+		case ErrSessionExpired:
+			writeAuthError(w, "X-AGW-Session expired — re-auth via POST /v1/auth")
+		default:
+			writeAuthError(w, "session lookup failed: "+err.Error())
+		}
+		return ""
+	}
+	// X-Payer (if present) must match the session's user.
+	xp := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Payer")))
+	if xp != "" && xp != rec.User {
+		writeAuthError(w, fmt.Sprintf("X-Payer (%s) does not match session user (%s)", xp, rec.User))
+		return ""
+	}
+	if requireRegistered && !p.Wallet.HasUser(rec.User) {
+		writeAuthError(w, "user not registered — topup first to register")
+		return ""
+	}
+	return rec.User
+}
+
+// verifySignedRequest reads X-Payer / X-AGW-Timestamp /
 // X-AGW-Signature from r, computes the expected message from
 // (method, path, body, timestamp, payer), and verifies the signature
-// against the recovered address. On success it returns the
-// normalized payer address. On failure it writes a 401 response and
-// returns "".
-//
-// requireRegistered: if true, the recovered address must be in
-// the wallet's user list. /v1/topup passes false (the signature IS
-// the registration); /v1/keys passes true (an attacker shouldn't
-// be able to mint keys for a never-seen user).
-func (p *Proxy) verifyManagementSignature(w http.ResponseWriter, r *http.Request, requireRegistered bool) string {
+// against the recovered address.
+func (p *Proxy) verifySignedRequest(w http.ResponseWriter, r *http.Request, requireRegistered bool) string {
 	// (1) Parse headers.
 	payer := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Payer")))
 	if payer == "" {

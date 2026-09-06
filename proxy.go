@@ -1196,6 +1196,21 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p.servePaymentsBalance(w, r)
 		return
 	}
+	// /v1/auth — sign-in: trade a one-time signature for a
+	// long-lived session token. Subsequent management calls use
+	// X-AGW-Session instead of X-AGW-Signature.
+	if r.URL.Path == "/v1/auth" {
+		p.serveAuth(w, r)
+		return
+	}
+	if r.URL.Path == "/v1/auth/logout" {
+		p.serveAuthLogout(w, r)
+		return
+	}
+	if r.URL.Path == "/v1/auth/sessions" {
+		p.serveAuthSessions(w, r)
+		return
+	}
 	// Per-user rollup — open (no auth in MVP).
 	if r.URL.Path == "/payments/users" && r.Method == http.MethodGet {
 		p.servePaymentsUsers(w, r)
