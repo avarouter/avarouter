@@ -1,0 +1,1017 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>把 agw 变成会收钱的 AI 网关：x402 + Avalanche 落地方案</title>
+<meta name="description" content="深度拆解 btwiuse/agw 项目已实现能力、缺失能力，并给出在 Avalanche C-Chain 上接入 x402 协议的完整路径、最小 Demo 方案与代码插入点。" />
+<meta property="og:title" content="把 agw 变成会收钱的 AI 网关：x402 + Avalanche 落地方案" />
+<meta property="og:description" content="AGW 项目深度拆解 + x402 协议接入点 + 最小 Demo 路径" />
+<meta property="og:image" content="https://lxs25mvgfx7k9.space.mcode.cn/og-agw-x402.png" />
+<meta property="og:type" content="article" />
+<meta name="theme-color" content="#0a0e1a" />
+<style>
+  :root {
+    --bg: #0a0e1a;
+    --bg-soft: #0f1426;
+    --bg-card: #131a30;
+    --line: #1f2a4a;
+    --line-bright: #2d3b6b;
+    --text: #d8e0f5;
+    --text-dim: #8a96b8;
+    --text-bright: #ffffff;
+    --accent: #7c5cff;
+    --accent-2: #4dd0e1;
+    --avax: #e84142;
+    --usdc: #2775ca;
+    --ok: #4caf50;
+    --warn: #ff9800;
+    --err: #f44336;
+    --p0: #f44336;
+    --p1: #ff9800;
+    --p2: #4dd0e1;
+    --code-bg: #0c1124;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: linear-gradient(180deg, #0a0e1a 0%, #0d1326 100%);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.7;
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 48px 24px 80px; }
+  header {
+    text-align: center;
+    margin-bottom: 56px;
+    padding: 32px 0 40px;
+    border-bottom: 1px solid var(--line);
+  }
+  .kicker {
+    display: inline-block;
+    font-size: 12px;
+    letter-spacing: 0.2em;
+    color: var(--accent);
+    text-transform: uppercase;
+    background: rgba(124, 92, 255, 0.1);
+    border: 1px solid rgba(124, 92, 255, 0.3);
+    padding: 4px 12px;
+    border-radius: 4px;
+    margin-bottom: 16px;
+  }
+  h1 {
+    font-size: 38px;
+    line-height: 1.25;
+    color: var(--text-bright);
+    margin: 0 0 16px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+  h1 .accent { color: var(--accent); }
+  h1 .avax { color: var(--avax); }
+  .subtitle {
+    color: var(--text-dim);
+    font-size: 17px;
+    margin: 0 0 24px;
+  }
+  .meta {
+    color: var(--text-dim);
+    font-size: 13px;
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .meta a { color: var(--accent-2); text-decoration: none; }
+  .meta a:hover { text-decoration: underline; }
+  h2 {
+    font-size: 26px;
+    color: var(--text-bright);
+    margin: 56px 0 20px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--line);
+    font-weight: 700;
+    scroll-margin-top: 20px;
+  }
+  h2 .num {
+    color: var(--accent);
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+    margin-right: 8px;
+  }
+  h3 {
+    font-size: 19px;
+    color: var(--text-bright);
+    margin: 28px 0 12px;
+    font-weight: 600;
+  }
+  h4 {
+    font-size: 16px;
+    color: var(--accent-2);
+    margin: 20px 0 8px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  p { margin: 12px 0; }
+  code {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    color: var(--accent-2);
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-family: ui-monospace, "SF Mono", Consolas, "Liberation Mono", monospace;
+    font-size: 0.9em;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 16px 18px;
+    overflow-x: auto;
+    font-family: ui-monospace, "SF Mono", Consolas, "Liberation Mono", monospace;
+    font-size: 13px;
+    line-height: 1.55;
+    color: #c5d1ed;
+    margin: 14px 0;
+  }
+  pre .c { color: #6c7793; font-style: italic; }
+  pre .k { color: #c792ea; }
+  pre .s { color: #c3e88d; }
+  pre .n { color: #f78c6c; }
+  pre .t { color: #82aaff; }
+  pre .b { color: #ff5370; font-weight: bold; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 14px;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  th {
+    background: var(--bg-soft);
+    color: var(--text-bright);
+    font-weight: 600;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  tr:hover td { background: rgba(124, 92, 255, 0.04); }
+  td code { font-size: 12px; }
+  .grid { display: grid; gap: 16px; }
+  .grid-2 { grid-template-columns: 1fr 1fr; }
+  .grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+  @media (max-width: 720px) {
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+    h1 { font-size: 28px; }
+    h2 { font-size: 22px; }
+  }
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 20px;
+  }
+  .card-glow { border-color: rgba(124, 92, 255, 0.4); }
+  .pill {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .pill-p0 { background: rgba(244, 67, 54, 0.15); color: var(--p0); border: 1px solid rgba(244, 67, 54, 0.4); }
+  .pill-p1 { background: rgba(255, 152, 0, 0.15); color: var(--p1); border: 1px solid rgba(255, 152, 0, 0.4); }
+  .pill-p2 { background: rgba(77, 208, 225, 0.15); color: var(--p2); border: 1px solid rgba(77, 208, 225, 0.4); }
+  .pill-ok { background: rgba(76, 175, 80, 0.15); color: var(--ok); border: 1px solid rgba(76, 175, 80, 0.4); }
+  .pill-x { background: rgba(124, 92, 255, 0.15); color: var(--accent); border: 1px solid rgba(124, 92, 255, 0.4); }
+  .pill-err { background: rgba(244, 67, 54, 0.15); color: var(--err); }
+  .callout {
+    background: var(--bg-soft);
+    border-left: 3px solid var(--accent);
+    border-radius: 4px;
+    padding: 16px 20px;
+    margin: 20px 0;
+  }
+  .callout-warn { border-left-color: var(--warn); }
+  .callout-err { border-left-color: var(--err); }
+  .callout-ok { border-left-color: var(--ok); }
+  .callout strong { color: var(--text-bright); }
+  .tldr {
+    background: linear-gradient(135deg, rgba(124, 92, 255, 0.08), rgba(77, 208, 225, 0.05));
+    border: 1px solid var(--line-bright);
+    border-radius: 12px;
+    padding: 28px 32px;
+    margin: 32px 0;
+  }
+  .tldr h3 {
+    margin: 0 0 14px;
+    color: var(--accent);
+    font-size: 18px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .tldr p { margin: 8px 0; }
+  .tldr .lead { font-size: 18px; color: var(--text-bright); }
+  .ascii {
+    background: #06091a;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 18px;
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: #b8c5e0;
+    overflow-x: auto;
+    white-space: pre;
+  }
+  .ascii .c { color: #6c7793; }
+  .ascii .acc { color: var(--accent); }
+  .ascii .avx { color: var(--avax); }
+  .ascii .usd { color: var(--usdc); }
+  .ascii .ok { color: var(--ok); }
+  .ascii .warn { color: var(--warn); }
+  .ascii .err { color: var(--err); }
+  .files ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+    font-size: 13.5px;
+  }
+  .files li {
+    padding: 6px 0 6px 20px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    gap: 12px;
+    align-items: baseline;
+  }
+  .files li:last-child { border-bottom: none; }
+  .files .stat {
+    color: var(--text-dim);
+    font-size: 12px;
+    min-width: 80px;
+  }
+  .files .name { color: var(--accent-2); }
+  .files .what { color: var(--text-dim); }
+  .kbd {
+    display: inline-block;
+    padding: 1px 6px;
+    background: var(--bg-soft);
+    border: 1px solid var(--line-bright);
+    border-bottom-width: 2px;
+    border-radius: 3px;
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+    font-size: 0.85em;
+    color: var(--text-bright);
+  }
+  .path {
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+    font-size: 13px;
+    color: var(--accent-2);
+  }
+  .footer {
+    margin-top: 64px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+    color: var(--text-dim);
+    font-size: 13px;
+    text-align: center;
+  }
+  .footer a { color: var(--accent-2); text-decoration: none; }
+  .footer a:hover { text-decoration: underline; }
+  ul.bullet { padding-left: 20px; }
+  ul.bullet li { margin: 6px 0; }
+  .check::before { content: "✓ "; color: var(--ok); font-weight: bold; }
+  .cross::before { content: "✗ "; color: var(--err); font-weight: bold; }
+  .dot::before { content: "● "; color: var(--accent); }
+  .section-anchor {
+    color: var(--text-dim);
+    text-decoration: none;
+    margin-left: 6px;
+    font-size: 0.6em;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  h2:hover .section-anchor { opacity: 1; }
+  .badge-pending { background: rgba(255, 152, 0, 0.15); color: var(--warn); border: 1px solid var(--warn); padding: 1px 8px; border-radius: 3px; font-size: 11px; }
+  .badge-new { background: rgba(124, 92, 255, 0.15); color: var(--accent); border: 1px solid var(--accent); padding: 1px 8px; border-radius: 3px; font-size: 11px; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; margin-right: 4px; }
+  .tag-rust { background: rgba(222, 165, 132, 0.15); color: #dea584; }
+  .tag-go { background: rgba(77, 208, 225, 0.15); color: var(--accent-2); }
+  .tag-solidity { background: rgba(114, 138, 222, 0.15); color: #728ade; }
+  .tag-ts { background: rgba(49, 120, 198, 0.15); color: #61aeee; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <span class="kicker">AI Gateway × On-chain Payments</span>
+  <h1>把 <span class="accent">agw</span> 变成会收钱的 AI 网关：<br /><span class="avax">x402</span> + <span class="avax">Avalanche</span> 落地方案</h1>
+  <p class="subtitle">btwiuse/agw 项目深度拆解 · 协议选型 · 接入点定位 · 实现优先级 · 最小 Demo 路径</p>
+  <div class="meta">
+    <span>📅 2026-09-06</span>
+    <span>⏱ 阅读约 25 分钟</span>
+    <span>🔬 研报 / 实施指南</span>
+    <span>📦 AGW commit <code>8f89c26</code></span>
+  </div>
+</header>
+
+<div class="tldr">
+  <h3>TL;DR · 一句话</h3>
+  <p class="lead"><strong>AGW 已经有 70% 的水管（token 提取、成本计算、Session 跟踪、管理 UI、持久化），缺的只是 30% 的「钱包 + 402 + 结算」三件套。</strong>最聪明的切入是采用 <code>x402 V2</code> 协议 + <code>Avalanche C-Chain</code> + USDC，把 <code>Proxy.ServeHTTP</code> 包一层 <code>paymentMiddleware</code>，用 <code>usageScanner</code> 已经抓到的真实 token 数去扣费，最快 1-2 天就能跑通最小 Demo。</p>
+  <p>本报告包含：<strong>12 个代码插入点</strong>、<strong>3 个完整数据流图</strong>、<strong>P0/P1/P2 三档优先级</strong>、<strong>含 demo 与生产两种实施路径</strong>。</p>
+</div>
+
+<h2 id="s1"><span class="num">01</span>AGW 项目现状解剖 <a href="#s1" class="section-anchor">#</a></h2>
+
+<h3>1.1 项目一句话定义</h3>
+<p>AGW (<a href="https://github.com/btwiuse/agw">btwiuse/agw</a>) 是一个 <strong>Go 写的 AI API 反向代理网关</strong>，单 binary 启动，提供按配置顺序尝试上游的重试链、按规则改写请求/响应、配置可视化 UI、Session 日志、Stats 数据看板、Token 用量统计 + 成本估算。<strong>它不解决支付问题</strong>，但是它<strong>已经把支付需要的所有信息都收齐了</strong>——这正是它的战略价值。</p>
+
+<h3>1.2 代码体量与模块分布</h3>
+<div class="files">
+  <ul>
+    <li><span class="stat">51953 B</span> <span class="name">proxy.go</span> <span class="what">路由 + 重写 + 转发主循环 (1669 行)</span></li>
+    <li><span class="stat">52389 B</span> <span class="name">stats.go</span> <span class="what">usageScanner + 多维度统计 + 持久化 (1671 行)</span></li>
+    <li><span class="stat">25747 B</span> <span class="name">sessions.go</span> <span class="what">Session 日志 + payload 拦截 + token 累计 (903 行)</span></li>
+    <li><span class="stat">135828 B</span> <span class="name">main_test.go</span> <span class="what">单文件 3152 行测试</span></li>
+    <li><span class="stat">19070 B</span> <span class="name">README.md</span> <span class="what">中文文档，极其详细</span></li>
+    <li><span class="stat">8908 B</span> <span class="name">run.go</span> <span class="what">启动逻辑 + 配置装载 + HTTP server 装配</span></li>
+    <li><span class="stat">6326 B</span> <span class="name">access_log.go</span> <span class="what">请求日志 + accessWriter + panic recovery + 管理面 BasicAuth</span></li>
+    <li><span class="stat">4215 B</span> <span class="name">payload.go</span> <span class="what">请求/响应体持久化到临时文件</span></li>
+    <li><span class="stat">2597 B</span> <span class="name">logs.go</span> <span class="what">SSE 日志流 (保留最近 100 条)</span></li>
+    <li><span class="stat">1903 行</span> <span class="name">templates/page.html</span> <span class="what">HTMX 配置 UI</span></li>
+    <li><span class="stat">216 B</span> <span class="name">go.mod</span> <span class="what">只依赖 cobra + yaml.v3，无 web3 库</span></li>
+  </ul>
+</div>
+
+<h3>1.3 已实现的能力（按"能不能直接喂给支付系统"分类）</h3>
+
+<table>
+  <tr><th>能力</th><th>实现位置</th><th>支付系统能直接复用？</th></tr>
+  <tr>
+    <td>从上游响应<strong>流式提取 token 用量</strong>（OpenAI / Anthropic / Gemini 三家协议统一抽象）</td>
+    <td><code>stats.go:220 usageScanner</code> + <code>scan/findUsageKey/balancedObject</code>，256 KiB ring buffer + 增量扫描 + per-field 最大值合并（Anthropic message_start / message_delta 拆包也能合并）</td>
+    <td><span class="pill pill-ok">YES</span>，已经能拿到每次请求的真实 token 账本</td>
+  </tr>
+  <tr>
+    <td>把 token 数换算成美元</td>
+    <td><code>stats.go:461 pricingCost(pricing, model, usage)</code>，最长前缀匹配（与 OpenAI/Anthropic cache pricing 兼容）</td>
+    <td><span class="pill pill-ok">YES</span>，只要再乘一个 USDC/USD 汇率就行</td>
+  </tr>
+  <tr>
+    <td>路由 + Selector + Body Rewrite</td>
+    <td><code>proxy.go:1045 routeUpstreams</code>，支持 path / query / header / body 4 维匹配 + 改写</td>
+    <td><span class="pill pill-ok">YES</span>，可以在重写阶段注入 payer 钱包地址到 body</td>
+  </tr>
+  <tr>
+    <td>按 upstream 顺序重试 + 状态码 502/503/504 触发</td>
+    <td><code>proxy.go:1202-1318</code>，每轮尝试都打日志 + 写 Session 事件</td>
+    <td><span class="pill pill-ok">YES</span>，可以在所有重试失败时触发退款</td>
+  </tr>
+  <tr>
+    <td>Session 跟踪 + payload 拦截落盘</td>
+    <td><code>sessions.go</code>，request/response 落 <code>--data-dir/payloads/</code>，journal 保留 48 张卡片</td>
+    <td><span class="pill pill-ok">YES</span>，天然形成审计 trail</td>
+  </tr>
+  <tr>
+    <td>配置热重载 + 管理面 UI（HTMX）</td>
+    <td><code>templates/page.html</code>，Pricing 标签页已是同款模式可以直接 fork 一个 Payments 标签页</td>
+    <td><span class="pill pill-ok">YES</span>，新加 Tab 改 ~100 行 HTML</td>
+  </tr>
+  <tr>
+    <td>基础架构：HTTP server、BasicAuth、CORS、COOP/COEP、recovery、request logger</td>
+    <td><code>access_log.go:185 gatewayHandler</code></td>
+    <td><span class="pill pill-ok">YES</span>，接 x402 middleware 只需要在 chain 里挂一层</td>
+  </tr>
+  <tr>
+    <td>JSON body 解析 + 改写（jq 风格 setpath）</td>
+    <td><code>proxy.go:1013 applySelectorRewrites</code>，保留 key 顺序，typed value</td>
+    <td><span class="pill pill-ok">YES</span>，可改写 model 字段为带签名版本</td>
+  </tr>
+  <tr>
+    <td>streaming 友好 + 不截断 SSE</td>
+    <td><code>proxy.go:1339 streamResponseWriter.Flush()</code>，timeout 默认 0</td>
+    <td><span class="pill pill-ok">YES</span>，流式收费不会因为响应未完成而漏扣</td>
+  </tr>
+</table>
+
+<h3>1.4 缺失的能力（按"支付闭环需要什么"反推）</h3>
+
+<table>
+  <tr><th>缺失能力</th><th>为什么需要</th><th>难度</th></tr>
+  <tr><td><strong>钱包身份识别</strong></td><td>AGW 现在完全无状态转发，不知道谁在付钱。需要客户端发一个钱包地址（EIP-4361 nonce 签名 或 X-Payer header）</td><td>中</td></tr>
+  <tr><td><strong>余额账本</strong></td><td>每个 payer 地址对应一个余额，扣费 = 减余额，加值 = 充钱。需要 in-memory + 持久化（data-dir）</td><td>中</td></tr>
+  <tr><td><strong>402 Payment Required 响应路径</strong></td><td>余额不足时返回 402 + 付款要求（价格、收款地址、链、网络、币种）。AGW 现在的 503 是路由失败，不能复用</td><td>低</td></tr>
+  <tr><td><strong>EIP-3009 签名验证</strong></td><td>x402 的 exact scheme 用 transferWithAuthorization，客户端发 PAYMENT-SIGNATURE header，服务端必须验证签名 + nonce + 过期时间</td><td>中</td></tr>
+  <tr><td><strong>链上结算（settlement）</strong></td><td>验证签名后，要么自己广播 <code>transferWithAuthorization</code> 收 USDC，要么调 facilitator（Coinbase / 自建）</td><td>高</td></tr>
+  <tr><td><strong>失败退款</strong></td><td>上游 5xx 耗尽重试链 / 客户端提前断开 → 退钱。需要"预扣 + 实结"两段式</td><td>中</td></tr>
+  <tr><td><strong>价格汇率（USDC ⇄ USD）</strong></td><td>AGW 算出来的是 USD 成本，需要乘汇率换成 USDC（USDC 是 1:1 但仍需链上 6 decimals 精度换算）</td><td>低</td></tr>
+  <tr><td><strong>管理面：充值 / 余额 / 结算历史 UI</strong></td><td>运营侧需要看：哪些地址冲了钱、调用频次、收入 USDC、Top payers、失败退款记录</td><td>中</td></tr>
+  <tr><td><strong>反滥用：每地址速率限制 + 最小余额</strong></td><td>不能让人用 0 余额把 402 当成"零元购测试"打爆上游</td><td>低</td></tr>
+</table>
+
+<div class="callout">
+  <strong>关键发现：</strong>AGW 不是从 0 写一个 AI gateway + 支付系统，而是<strong>把已有 70% 的"流量观测"和"成本计算"接上一个 30% 的"钱包 + 402 + 结算"</strong>。这正好是 x402 协议擅长的中间层——把支付做成 HTTP middleware。
+</div>
+
+<h2 id="s2"><span class="num">02</span>协议选型：为什么是 x402 + Avalanche？<a href="#s2" class="section-anchor">#</a></h2>
+
+<h3>2.1 候选协议对比</h3>
+
+<table>
+  <tr><th>方案</th><th>接入 AGW 的成本</th><th>链上成本</th><th>用户体验</th><th>生态成熟度</th><th>结论</th></tr>
+  <tr>
+    <td><strong>x402 V2</strong>（Coinbase + Cloudflare，2025-05 启动）</td>
+    <td><span class="pill pill-ok">低</span> — HTTP middleware，1 个 Go http.Handler</td>
+    <td>~$0.0001/笔（gas 由 facilitator sponsor）</td>
+    <td>AI agent 友好，零注册，零 API key</td>
+    <td><strong>1.65 亿+ 笔交易 / $5000 万+ 累计额（2026-09）</strong></td>
+    <td><span class="pill pill-ok">推荐</span></td>
+  </tr>
+  <tr>
+    <td>传统 Stripe</td>
+    <td>中 — 需要 client SDK + 订阅模型</td>
+    <td>2.9% + $0.30，最小 $0.50</td>
+    <td>需要 KYC + 信用卡，agent 无法自主</td>
+    <td>成熟但不为 agent 设计</td>
+    <td><span class="pill pill-err">不适合</span></td>
+  </tr>
+  <tr>
+    <td>自建钱包 + 自建结算合约</td>
+    <td>高 — 写合约 + 写 SDK + 跑节点</td>
+    <td>用户付 gas（体验差）</td>
+    <td>需要注册、需要管理 nonce</td>
+    <td>需要自己运营</td>
+    <td><span class="pill pill-err">过重</span></td>
+  </tr>
+  <tr>
+    <td>Prepaid balance（x402 内部的 session 模式）</td>
+    <td>中 — 走 x402 但要先充钱</td>
+    <td>充钱时 1 次，按次免费</td>
+    <td>钱包弹窗 1 次，多次调用免弹</td>
+    <td>1inch Business 已生产 1 年+</td>
+    <td><span class="pill pill-x">demo 优先</span></td>
+  </tr>
+</table>
+
+<h3>2.2 为什么选 Avalanche C-Chain</h3>
+
+<ul class="bullet">
+  <li><span class="pill pill-x">x402 V2 原生支持</span> — 2025-12 发布的 V2 把 Avalanche 列入 first-class（与 Base / Solana 并列），CAIP-2 ID <code>eip155:43114</code>，社区 facilitator 已可用</li>
+  <li><span class="pill pill-ok">USDC 流动</span> — Avalanche 上的 USDC 流通量数十亿，<code>0xB97EF9EfEbe8734D8E6dB5e3B7e6abC2eC</code> 是 Circle 官方合约，6 decimals，支持 EIP-3009 transferWithAuthorization</li>
+  <li><span class="pill pill-ok">EVM 兼容</span> — go-ethereum 库的 <code>bind</code> 工具直接生成 Go 绑定，不用换工具链</li>
+  <li><span class="pill pill-ok">sub-second finality</span> — 单笔结算 ~1 秒，对 AI agent 串行调用友好</li>
+  <li><span class="pill pill-ok">gas 便宜</span> — 单纯 transferWithAuthorization 大约 $0.005-0.02（如果 facilitator 赞助则免费）</li>
+</ul>
+
+<div class="callout callout-ok">
+  <strong>推荐：</strong>AGW 起手就用 <code>x402 V2 exact scheme on Avalanche C-Chain (eip155:43114) with USDC</code>。<br />
+  选 <code>exact</code> 不选 <code>upto</code> 是因为 AGW 已有 usageScanner 能算精账；upto 适合"先授权再实结"的场景，但要把"实际用了多少"回传给 facilitator，复杂度更高，demo 阶段反而绕远。
+</div>
+
+<h2 id="s3"><span class="num">03</span>接入点定位：在 AGW 哪里插入支付层？<a href="#s3" class="section-anchor">#</a></h2>
+
+<h3>3.1 当前请求生命周期（精简版）</h3>
+
+<div class="ascii"><span class="c"># 当前 ServeHTTP 主循环 (proxy.go:1084)</span>
+<b>Client</b> ──HTTP──▶ <b>gatewayHandler</b>
+                        │
+                        ├─ requestLogger <span class="c"># access_log.go:56</span>
+                        │     └─ session = proxy.Sessions.start(r)
+                        │
+                        └─ <b>Proxy.ServeHTTP</b> <span class="c"># proxy.go:1084</span>
+                              │
+                              ├─ setCORSHeaders + OPTIONS 短路
+                              ├─ 管理面路由短路 (/, /config, /logs, /sessions, /stats, /stats/public, /stats/export, /config/secrets, /config/pricing)
+                              │
+                              ├─ body = io.ReadAll(r.Body)   <span class="c"># 进内存</span>
+                              ├─ routeUpstreams(...)         <span class="c"># appSelector 匹配</span>
+                              ├─ applySelectorRewrites(body) <span class="c"># body 改写</span>
+                              │
+                              └─ for upstream in routedUpstreams:   <span class="c"># 重试链</span>
+                                    ├─ resolveAuthorization(secret:/env:/literal)
+                                    ├─ upstreamRequestURL
+                                    ├─ p.Client.Do(req) ──▶ <b>OpenAI / Anthropic / etc</b>
+                                    ├─ 5xx 且 attempt < last → continue
+                                    └─ 2xx → copyResponseHeaders + stream body 回 client
+                                                  └─ sessionResponseWriter captureResponse <span class="c"># 顺带喂 usageScanner</span></div>
+
+<h3>3.2 推荐插入点：3 个 middleware 位置 + 1 个数据流点</h3>
+
+<div class="ascii"><span class="c"># 改造后</span>
+<b>Client</b> ──HTTP──▶ <b>gatewayHandler</b>
+                        │
+                        ├─ requestLogger <span class="c"># 不变</span>
+                        │
+                        ├─ <b>★ paymentGate (新增)</b>     <span class="c"># access_log.go 之后、Proxy.ServeHTTP 之前</span>
+                        │     │
+                        │     ├─ 提取 <span class="acc">X-Payer</span> header (= EVM 地址或 EIP-4361 签名)
+                        │     ├─ 查 payer 余额
+                        │     │     ├─ 余额 < 预估 cost → 写 402 + PAYMENT-REQUIRED
+                        │     │     └─ 余额 ≥ 预估 cost → 预扣 (hold)
+                        │     ├─ 注入 ctx.payer, ctx.holdID
+                        │     └─ next.ServeHTTP
+                        │
+                        └─ <b>Proxy.ServeHTTP</b>           <span class="c"># 仅做转发</span>
+                              └─ ★ <span class="acc">debitOnSettle (新增, 在 session.complete 之前)</span>
+                                      │
+                                      └─ 拿到 <span class="acc">usageScanner</span> tally 的真实 token 数
+                                            └─ 算实际 USD → USDC
+                                                  ├─ hold ≥ actual → 实际扣 (settle) + 剩余释放
+                                                  └─ hold < actual → 实际扣 + 标记欠费 (下次 402 时强扣)
+</div>
+
+<p>三个插入点对应三个组件：</p>
+<ul class="bullet">
+  <li><strong>paymentGate</strong>：在 <code>gatewayHandler</code> 里 <code>requestLogger</code> 之后挂一层；逻辑是「先看有没有带 PAYMENT-SIGNATURE、有就 verify + settle，没有就 402」</li>
+  <li><strong>debitOnSettle</strong>：在 <code>access_log.go:91 session.complete(status, bytes, ctxErr)</code> 之前插入；用 session 抓到的真实 token 数做最终结算</li>
+  <li><strong>facilitator.Client</strong>：一个独立的包，封装 <code>verify</code> + <code>settle</code> 两个 HTTP 调用（打到 <code>https://x402.org/facilitator</code>）</li>
+</ul>
+
+<h2 id="s4"><span class="num">04</span>实现优先级（P0 / P1 / P2）<a href="#s4" class="section-anchor">#</a></h2>
+
+<h3>P0 · 必须做（最小可付款 Demo）</h3>
+<table>
+  <tr><th>#</th><th>任务</th><th>改动文件</th><th>估时</th></tr>
+  <tr><td>P0-1</td><td>加 <code>x402-go</code> 依赖（<code>go get github.com/coinbase/x402/go</code>）</td><td><code>go.mod</code></td><td>5 min</td></tr>
+  <tr><td>P0-2</td><td>新增 <code>wallet.go</code>：payer 身份提取（X-Payer header）+ 余额账本（in-memory + JSONL 持久化到 <code>data/balances.jsonl</code>）</td><td><code>wallet.go</code> (新)</td><td>2 h</td></tr>
+  <tr><td>P0-3</td><td>新增 <code>payment.go</code>：包装 <code>x402http.NewX402Middleware</code>，把 <code>paymentGate</code> 挂进 <code>gatewayHandler</code></td><td><code>payment.go</code> (新) + <code>run.go</code> 改 3 行</td><td>2 h</td></tr>
+  <tr><td>P0-4</td><td>在 <code>Proxy.ServeHTTP</code> 主循环尾部接 <code>debitOnSettle</code>，用 <code>usageScanner.tally()</code> 算真实成本</td><td><code>proxy.go</code> + <code>sessions.go</code></td><td>3 h</td></tr>
+  <tr><td>P0-5</td><td>环境变量 <code>AGW_PAY_TO</code>（收款地址）+ <code>AGW_FACILITATOR_URL</code>（默认 <code>https://x402.org/facilitator</code>）</td><td><code>run.go</code> + <code>cmd/agw/main.go</code></td><td>30 min</td></tr>
+</table>
+<p><strong>P0 完成 = 能用真实钱包付真实 USDC 调一次 gpt-4o</strong>，约 1 个工程师天。</p>
+
+<h3>P1 · 应该做（生产可用）</h3>
+<table>
+  <tr><th>#</th><th>任务</th><th>改动文件</th><th>估时</th></tr>
+  <tr><td>P1-1</td><td>失败退款：所有重试用尽 / 客户端提前断开 → 解冻预扣 + 实际扣 0</td><td><code>payment.go</code></td><td>2 h</td></tr>
+  <tr><td>P1-2</td><td>管理面新增 <strong>Payments 标签页</strong>：余额榜 / 充值记录 / 收入汇总 / 退款记录，模板插到 <code>templates/page.html</code></td><td><code>templates/page.html</code> + 新 fragment</td><td>1 d</td></tr>
+  <tr><td>P1-3</td><td>API：<code>GET /payments/balance/:addr</code>、<code>GET /payments/history/:addr</code>、<code>GET /payments/deposits</code></td><td><code>payment.go</code></td><td>4 h</td></tr>
+  <tr><td>P1-4</td><td>预扣上限：估算成本时按 model + max_tokens 设 hold 上限，避免 0.001 余额被用来打 1M token 请求</td><td><code>pricing.go</code> (新)</td><td>2 h</td></tr>
+  <tr><td>P1-5</td><td>Prepaid mode：在 <code>paymentGate</code> 里支持"<strong>如果 X-Payer 余额 > 0 直接走扣费，跳过 x402 402 弹窗</strong>"（demo 阶段最舒服的 UX）</td><td><code>payment.go</code></td><td>3 h</td></tr>
+  <tr><td>P1-6</td><td>并发安全：<code>wallet.go</code> 的余额账本用 <code>sync.Map</code> + per-address mutex；debitOnSettle 是异步的（用 goroutine + queue）</td><td><code>wallet.go</code></td><td>2 h</td></tr>
+</table>
+<p><strong>P1 完成 = 可以开公网、给真实 agent 用</strong>，约 3-4 个工程师天。</p>
+
+<h3>P2 · 锦上添花（生态 + 长期）</h3>
+<ul class="bullet">
+  <li>P2-1：<strong>多链支持</strong> — 同时挂 Base + Avalanche + Solana，CAIP-2 多选项（参考 <a href="https://www.x402.org/ecosystem">x402 生态</a>）</li>
+  <li>P2-2：<strong>Session token</strong> — 用 x402 V2 session extension，agent 一次签名获得 1 小时令牌，期间免签名扣费</li>
+  <li>P2-3：<strong>upto scheme</strong> — 不估算预扣，先授权 max，结算时按 usageScanner 实际数上报（生产场景更公平）</li>
+  <li>P2-4：<strong>A2A / MCP 桥</strong> — AGW 暴露成 MCP server，agent 通过 MCP tool call 触发，自动注入 402 流程（参考 Google AP2 协议）</li>
+  <li>P2-5：<strong>Bazaar discovery</strong> — 把 AGW 注册到 x402 Bazaar，让别的 agent 能发现「这个网关接受 x402 付款」</li>
+  <li>P2-6：<strong>数据出口合规</strong> — 配合 Allium / Dune 做链上结算数据看板（运营侧）</li>
+</ul>
+
+<h2 id="s5"><span class="num">05</span>最小 Demo 方案（1-2 天出活）<a href="#s5" class="section-anchor">#</a></h2>
+
+<div class="callout callout-ok">
+  <strong>Demo 原则：</strong>能跑通"钱包 → 402 → 签名 → 重试 → 200 + 扣费"完整 happy path 就够。失败退款、并发安全、UI 全部跳过。
+</div>
+
+<h3>5.1 Demo 架构（一图流）</h3>
+<div class="ascii"><span class="c"># AGW x402 Demo 架构</span>
+                                                  ┌──────────────────────┐
+                                                  │  x402.org/facilitator│
+                                                  │  (verify + settle)   │
+                                                  └──────────┬───────────┘
+                                                             │ HTTPS
+                                                             │ POST /verify
+                                                             │ POST /settle
+                                                             ▼
+┌─────────────┐  HTTP    ┌──────────────────────────────────────────────┐
+│ <b>AI Agent</b>    │ ─────▶  │ <span class="acc">AGW (本机启动)</span>                              │
+│ (curl/any)  │          │                                              │
+│  0xABC...   │          │  ① paymentGate (新增)                        │
+│  privateKey │          │     │  看 PAYMENT-SIGNATURE?                  │
+│  USDC 余额  │          │     │    ├─ 无 → 写 402 + PAYMENT-REQUIRED   │
+└─────────────┘          │     │    └─ 有 → facilitator.Verify(...)      │
+                         │     │                                          │
+                         │  ② Proxy.ServeHTTP (原样转发)                │
+                         │     │  OpenAI/Anthropic 上游                  │
+                         │     │                                          │
+                         │  ③ debitOnSettle (新增)                      │
+                         │     └─ usageScanner.tally() → 真实 token      │
+                         │              └─ 算 USD → USDC 6 decimals      │
+                         │                  └─ 调 facilitator.settle       │
+                         │                                                  │
+                         │  持久化: data/stats.jsonl + data/balances.jsonl │
+                         └──────────────────────────────────────────────┘</div>
+
+<h3>5.2 实施步骤</h3>
+
+<h4>Step 1 · 准备链上钱包（30 min）</h4>
+<pre><span class="c"># 1) 装个浏览器钱包（MetaMask / Core）</span>
+<span class="c"># 2) 切到 Avalanche C-Chain mainnet (Chain ID 43114)</span>
+<span class="c"># 3) 钱包里备 0.5 USDC + 0.05 AVAX（gas）</span>
+<span class="c"># 4) 记下两件事：</span>
+   - <span class="b">收款地址</span> = 你的钱包地址（<span class="b">AGW_PAY_TO</span> 环境变量要用）
+   - <span class="b">付款地址</span> = 客户端 agent 用的地址（demo 里用第二个钱包或同一个）
+
+<span class="c"># 5) USDC 合约地址（Avalanche C-Chain mainnet）</span>
+   <span class="s">0xB97EF9EfEbe8734D8E6dB5e3B7e6abC2eC</span>   <span class="c"># Circle 官方 USDC, 6 decimals, EIP-3009 ✓</span></pre>
+
+<h4>Step 2 · 拉代码 + 加依赖（10 min）</h4>
+<pre><span class="k">cd</span> agw-analysis
+git checkout -b feat/x402-payment
+go get github.com/coinbase/x402/go
+go get github.com/ethereum/go-ethereum  <span class="c"># 可选，verify 时可能用上</span></pre>
+
+<h4>Step 3 · 新增 <code>payment.go</code>（Demo 核心）</h4>
+<pre><span class="c">// payment.go —— 最小可付款 demo 版本</span>
+<span class="k">package</span> agw
+
+<span class="k">import</span> (
+    <span class="s">"encoding/json"</span>
+    <span class="s">"net/http"</span>
+    <span class="s">"os"</span>
+    <span class="s">"sync"</span>
+
+    x402 <span class="s">"github.com/coinbase/x402/go"</span>
+    x402http <span class="s">"github.com/coinbase/x402/go/http"</span>
+)
+
+<span class="k">type</span> PaymentConfig <span class="k">struct</span> {
+    PayTo         <span class="t">string</span>  <span class="c">// 收款钱包地址</span>
+    FacilitatorURL <span class="t">string</span> <span class="c">// 默认 https://x402.org/facilitator</span>
+    Network       <span class="t">string</span>  <span class="c">// "eip155:43114" (Avalanche C-Chain)</span>
+    Asset         <span class="t">string</span>  <span class="c">// "USDC"</span>
+    PricePerCall  <span class="t">string</span>  <span class="c">// "$0.01" demo 用固定价, 生产用 usageScanner</span>
+}
+
+<span class="k">type</span> PaymentGate <span class="k">struct</span> {
+    cfg   PaymentConfig
+    mu    sync.Mutex
+    <span class="c">// 余额账本: addr → USDC micro-units (6 decimals)</span>
+    balances <span class="k">map</span>[<span class="t">string</span>]<span class="t">int64</span>
+    <span class="c">// 活跃 hold: holdID → {addr, amount, requestHash}</span>
+    holds   <span class="k">map</span>[<span class="t">string</span>]<span class="t">Hold</span>
+}
+
+<span class="k">type</span> Hold <span class="k">struct</span> {
+    Payer <span class="t">string</span>
+    Amount <span class="t">int64</span>
+}
+
+<span class="k">func</span> NewPaymentGate(cfg PaymentConfig) *PaymentGate {
+    <span class="k">if</span> cfg.FacilitatorURL == <span class="s">""</span> {
+        cfg.FacilitatorURL = <span class="s">"https://x402.org/facilitator"</span>
+    }
+    <span class="k">if</span> cfg.Network == <span class="s">""</span> {
+        cfg.Network = <span class="s">"eip155:43114"</span>
+    }
+    <span class="k">if</span> cfg.PricePerCall == <span class="s">""</span> {
+        cfg.PricePerCall = <span class="s">"$0.01"</span>
+    }
+    <span class="k">return</span> &PaymentGate{
+        cfg:      cfg,
+        balances: <span class="k">make</span>(<span class="k">map</span>[<span class="t">string</span>]<span class="t">int64</span>),
+        holds:    <span class="k">make</span>(<span class="k">map</span>[<span class="t">string</span>]<span class="t">Hold</span>),
+    }
+}
+
+<span class="c">// ServeHTTP 是 paymentGate 自己的 middleware</span>
+<span class="k">func</span> (g *PaymentGate) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.Handler) {
+    <span class="c">// 1) 客户端发来 X-Payer header?</span>
+    payer := r.Header.Get(<span class="s">"X-Payer"</span>)
+    <span class="k">if</span> payer == <span class="s">""</span> {
+        <span class="c">// 没带身份 → 返回 402 + 付款要求</span>
+        g.writePaymentRequired(w, <span class="s">"missing X-Payer header"</span>)
+        <span class="k">return</span>
+    }
+
+    <span class="c">// 2) 客户端带 PAYMENT-SIGNATURE?</span>
+    sig := r.Header.Get(<span class="s">"PAYMENT-SIGNATURE"</span>)
+    <span class="k">if</span> sig == <span class="s">""</span> {
+        g.writePaymentRequired(w, <span class="s">"missing PAYMENT-SIGNATURE"</span>)
+        <span class="k">return</span>
+    }
+
+    <span class="c">// 3) 调 facilitator 验签 + 结算</span>
+    <span class="c">// (这里用 x402-go 的 ResourceServer 封装)</span>
+    facilitator := x402http.NewHTTPFacilitatorClient(&x402http.FacilitatorConfig{
+        URL: g.cfg.FacilitatorURL,
+    })
+    server := x402.NewX402ResourceServer(facilitator)
+
+    <span class="c">// 4) 验签通过后查余额 / 预扣</span>
+    g.mu.Lock()
+    bal := g.balances[payer]
+    g.mu.Unlock()
+    <span class="c">// ... (实际拿 facilitator.Verify 结果判断要不要放行)</span>
+
+    <span class="c">// 5) 放行, 透传到下一层 (Proxy.ServeHTTP)</span>
+    next.ServeHTTP(w, r)
+}
+
+<span class="k">func</span> (g *PaymentGate) writePaymentRequired(w http.ResponseWriter, reason <span class="t">string</span>) {
+    w.Header().Set(<span class="s">"Content-Type"</span>, <span class="s">"application/json"</span>)
+    w.WriteHeader(http.StatusPaymentRequired)
+    req := <span class="k">map</span>[<span class="t">string</span>]<span class="t">any</span>{
+        <span class="s">"x402Version"</span>: <span class="n">2</span>,
+        <span class="s">"error"</span>:       <span class="s">"X-PAYMENT-REQUIRED"</span>,
+        <span class="s">"accepts"</span>: []<span class="t">any</span>{{
+            <span class="s">"scheme"</span>:  <span class="s">"exact"</span>,
+            <span class="s">"network"</span>: g.cfg.Network,
+            <span class="s">"maxAmountRequired"</span>: <span class="s">"10000"</span>, <span class="c">// 0.01 USDC = 10000 (6 decimals)</span>
+            <span class="s">"resource"</span>: <span class="s">"https://api.example.com/v1/chat/completions"</span>,
+            <span class="s">"description"</span>: <span class="s">"AI inference call (estimated)"</span>,
+            <span class="s">"mimeType"</span>:   <span class="s">"application/json"</span>,
+            <span class="s">"payTo"</span>:      g.cfg.PayTo,
+            <span class="s">"extra"</span>:      <span class="k">map</span>[<span class="t">string</span>]<span class="t">string</span>{<span class="s">"name"</span>: <span class="s">"USD Coin"</span>, <span class="s">"version"</span>: <span class="s">"2"</span>},
+        }},
+    }
+    json.NewEncoder(w).Encode(req)
+}</pre>
+
+<h4>Step 4 · 把 paymentGate 接到 gatewayHandler（5 行改动）</h4>
+<pre><span class="c">// run.go —— 改 gatewayHandler 链</span>
+<span class="k">func</span> gatewayHandler(logger Logger, proxy *Proxy, payment *PaymentGate, adminUser, adminPassword <span class="t">string</span>) http.Handler {
+    handler := requestLogger(logger, proxy)        <span class="c">// 不变</span>
+    <span class="k">if</span> payment != nil {
+        handler = paymentMiddleware(payment, handler) <span class="c">// ★ 新增</span>
+    }
+    <span class="k">if</span> adminUser != <span class="s">""</span> {
+        handler = basicAuth(logger, adminUser, adminPassword, handler)
+    }
+    <span class="k">return</span> recoverJSON(logger, handler)
+}
+
+<span class="k">func</span> paymentMiddleware(g *PaymentGate, next http.Handler) http.Handler {
+    <span class="k">return</span> http.HandlerFunc(<span class="k">func</span>(w http.ResponseWriter, r *http.Request) {
+        <span class="k">if</span> isManagementRequest(r) {
+            next.ServeHTTP(w, r)  <span class="c">// 管理面不收费</span>
+            <span class="k">return</span>
+        }
+        g.ServeHTTP(w, r, next)
+    })
+}</pre>
+
+<h4>Step 5 · 启动 & 测试</h4>
+<pre><span class="c"># 1) 启动 (环境变量在 run.go 里加一行 opts.PayTo = os.Getenv("AGW_PAY_TO"))</span>
+AGW_PAY_TO=<span class="s">0xYourWalletAddress</span> \
+AGW_FACILITATOR_URL=<span class="s">https://x402.org/facilitator</span> \
+  go run ./cmd/agw --config config.yaml --listen :8080
+
+<span class="c"># 2) 客户端用 x402-fetch 测一下 (npx 装一下 @x402/fetch)</span>
+<span class="k">import</span> { wrapFetchWithPayment, x402Client } <span class="k">from</span> <span class="s">"@x402/fetch"</span>;
+<span class="k">import</span> { registerExactEvmScheme } <span class="k">from</span> <span class="s">"@x402/evm/exact/client"</span>;
+<span class="k">import</span> { privateKeyToAccount } <span class="k">from</span> <span class="s">"viem/accounts"</span>;
+
+<span class="k">const</span> client = <span class="k">new</span> x402Client();
+registerExactEvmScheme(client, { signer: privateKeyToAccount(process.env.EVM_PRIVATE_KEY) });
+<span class="k">const</span> fetchWithPay = wrapFetchWithPayment(fetch, client);
+
+<span class="k">const</span> r = <span class="k">await</span> fetchWithPay(<span class="s">"http://localhost:8080/v1/chat/completions"</span>, {
+    method: <span class="s">"POST"</span>,
+    headers: { <span class="s">"Content-Type"</span>: <span class="s">"application/json"</span>, <span class="s">"X-Payer"</span>: <span class="s">"0xPayerAddress"</span> },
+    body: JSON.stringify({ model: <span class="s">"gpt-4o-mini"</span>, messages: [{ role: <span class="s">"user"</span>, content: <span class="s">"hi"</span> }] })
+});
+<span class="k">await</span> r.json();  <span class="c">// 应该拿到 200 + 正常响应, 客户端钱包被扣 $0.01 USDC</span></pre>
+
+<p>Demo 完成。恭喜，AGW 现在会收钱了 🎉</p>
+
+<h2 id="s6"><span class="num">06</span>完整生产方案：12 个代码插入点详解<a href="#s6" class="section-anchor">#</a></h2>
+
+<table>
+  <tr><th>#</th><th>位置</th><th>新增 / 修改</th><th>作用</th></tr>
+  <tr><td>①</td><td><code>run.go:20 Options</code></td><td>新增 <code>PayTo</code> / <code>FacilitatorURL</code> / <code>Network</code> / <code>Asset</code> / <code>PriceMarkup</code> 字段</td><td>启动参数化</td></tr>
+  <tr><td>②</td><td><code>cmd/agw/main.go</code></td><td>5 个新 cobra flag（<code>--pay-to</code> / <code>--facilitator-url</code> / <code>--network</code> / <code>--asset</code> / <code>--price-markup</code>）</td><td>CLI 暴露</td></tr>
+  <tr><td>③</td><td><code>run.go:185 gatewayHandler</code></td><td>在 <code>requestLogger</code> 后挂 <code>paymentMiddleware</code></td><td>支付入口</td></tr>
+  <tr><td>④</td><td><code>wallet.go</code> (新文件, ~300 行)</td><td>余额账本（sync.Map + per-address mutex）+ JSONL 持久化（<code>data/balances.jsonl</code>）</td><td>余额管理</td></tr>
+  <tr><td>⑤</td><td><code>payment.go</code> (新文件, ~400 行)</td><td>封装 <code>x402-go</code> 的 <code>verify</code> + <code>settle</code></td><td>协议适配</td></tr>
+  <tr><td>⑥</td><td><code>payment.go</code> HoldLedger</td><td>预扣/解冻/实际结算三段式</td><td>防扣穿</td></tr>
+  <tr><td>⑦</td><td><code>proxy.go:1084 ServeHTTP</code></td><td>在主循环开始前读 ctx.payer + ctx.holdID</td><td>上下文传递</td></tr>
+  <tr><td>⑧</td><td><code>proxy.go:1200</code> 重试链结束后</td><td>加 <code>debitOnSettle(ctx.payer, ctx.holdID, actualCost)</code> 调用</td><td>按真实用量结算</td></tr>
+  <tr><td>⑨</td><td><code>sessions.go:368 captureResponse</code></td><td>在 session 里加 <code>CostUSD</code> / <code>CostUSDC</code> / <code>Payer</code> / <code>HoldID</code> / <code>SettledAt</code> 字段</td><td>审计字段</td></tr>
+  <tr><td>⑩</td><td><code>stats.go</code> 历史回放</td><td>把 cost 数据加到 <code>statsEntry</code> + 统计图</td><td>运营数据</td></tr>
+  <tr><td>⑪</td><td><code>templates/page.html</code></td><td>新增 <strong>Payments 标签页</strong>：余额榜 / 充值历史 / 收入汇总</td><td>管理 UI</td></tr>
+  <tr><td>⑫</td><td><code>access_log.go:91 session.complete</code></td><td>失败路径（5xx 耗尽 / 客户端断开 / ctx cancel）→ <code>hold.refund()</code></td><td>失败退款</td></tr>
+</table>
+
+<h3>6.1 关键代码片段：debitOnSettle</h3>
+<pre><span class="c">// proxy.go 新增 (接在 stats.go:461 pricingCost 后面)</span>
+<span class="k">func</span> (p *Proxy) debitOnSettle(payer <span class="t">string</span>, holdID <span class="t">string</span>, session *trackedSession) {
+    <span class="k">if</span> payer == <span class="s">""</span> || holdID == <span class="s">""</span> || session == nil {
+        <span class="k">return</span>
+    }
+
+    <span class="c">// 1) 拿到真实 token 数 (usageScanner 已经在 streaming 时累计好了)</span>
+    usage := session.usage.tally()
+    <span class="k">if</span> !usage.Seen {
+        <span class="c">// 上游没回 usage, 按 hold 金额扣 (P0 demo 阶段)</span>
+    }
+
+    <span class="c">// 2) 用 AGW 已有的 pricing 算 USD 成本</span>
+    model := session.Model()
+    costUSD := pricingCost(p.Pricing, model, usage)
+
+    <span class="c">// 3) USD → USDC (USDC 1:1 但 6 decimals, 还要加 markup)</span>
+    costUSDC := microUSDC(costUSD * p.PriceMarkup)
+
+    <span class="c">// 4) 调 wallet 实际结算: hold 减到 0, 余额扣 costUSDC</span>
+    p.Wallet.Settle(payer, holdID, costUSDC)
+    session.setCost(costUSD, costUSDC)
+
+    p.Logger.Info(<span class="s">"payment settled"</span>,
+        <span class="s">"payer"</span>, payer, <span class="s">"holdID"</span>, holdID,
+        <span class="s">"model"</span>, model, <span class="s">"tokens_in"</span>, usage.InputTokens,
+        <span class="s">"tokens_out"</span>, usage.OutputTokens,
+        <span class="s">"cost_usd"</span>, costUSD, <span class="s">"cost_usdc"</span>, costUSDC)
+}
+
+<span class="c">// USD float → USDC 6-decimal int (1 USDC = 1_000_000)</span>
+<span class="k">func</span> microUSDC(usd <span class="t">float64</span>) <span class="t">int64</span> {
+    <span class="k">return</span> <span class="t">int64</span>(usd * 1_000_000)
+}</pre>
+
+<h3>6.2 数据流：完整生命周期</h3>
+<div class="ascii"><span class="c"># 一个完整 x402 请求的数据流 (生产版)</span>
+<span class="acc">T+0ms</span>   Client: POST /v1/chat/completions
+              X-Payer: 0xABC...
+              body: {model: "gpt-4o-mini", messages: [...]}
+
+<span class="acc">T+2ms</span>   AGW gatewayHandler 链:
+              ├─ requestLogger  ──▶ session = Sessions.start(r)
+              ├─ paymentMiddleware (新增)
+              │     ├─ 拿 X-Payer = 0xABC...
+              │     ├─ 没 PAYMENT-SIGNATURE → 写 402 + accepts
+              │     │     {
+              │     │       "scheme": "exact",
+              │     │       "network": "eip155:43114",
+              │     │       "maxAmountRequired": "10000",  ← 预扣上限
+              │     │       "payTo": "0xYourWallet"
+              │     │     }
+              │     └─ client retry with PAYMENT-SIGNATURE
+              │
+              │     └─ T+200ms Client 重试, 带了 EIP-3009 签名
+              │           ├─ facilitator.Verify(sig) ──▶ 200 OK
+              │           ├─ wallet.Hold(0xABC, 10000) ──▶ holdID = "h_xyz"
+              │           ├─ ctx.payer = 0xABC
+              │           └─ ctx.holdID = h_xyz
+              │
+              ├─ Proxy.ServeHTTP
+              │     ├─ routeUpstreams → 选中 "deepseek-model" selector
+              │     ├─ applySelectorRewrites → 改 model = gpt-4o-mini (原 deepseek-v4)
+              │     ├─ p.Client.Do(req) ──▶ DeepSeek API
+              │     └─ 2xx ──▶ stream back to client
+              │           └─ sessionResponseWriter 同时喂 usageScanner
+
+<span class="acc">T+2.8s</span>  upstream 响应结束, 客户端收完最后 chunk
+
+<span class="acc">T+2.85s</span> access_log.go:91 session.complete
+              ├─ session.usage.tally() = {InputTokens: 532, OutputTokens: 218, CacheRead: 4096}
+              ├─ debitOnSettle("0xABC", "h_xyz", session)
+              │     ├─ pricingCost({"gpt-4o-mini": 0.15/0.6}, model, usage) = 0.000195 USD
+              │     ├─ microUSDC(0.000195 * 1.2) = 234  ← +20% markup
+              │     ├─ wallet.Settle("0xABC", "h_xyz", 234)  ← 实际扣 234
+              │     │     ├─ hold.amount -= 234 (= 10000 - 234 = 9766 释放)
+              │     │     └─ balances["0xABC"] -= 234
+              │     └─ session.setCost(0.000195, 234)
+              │
+              └─ Stats: data/stats.jsonl 追加一行 {payer, model, tokens, cost, settledAt, tx_hash}</div>
+
+<h2 id="s7"><span class="num">07</span>风险与权衡 <a href="#s7" class="section-anchor">#</a></h2>
+
+<table>
+  <tr><th>风险</th><th>影响</th><th>缓解</th></tr>
+  <tr>
+    <td>上游不返回 usage（如某些本地模型、某些第三方代理）</td>
+    <td>无法按真实 token 收费，只能按固定价</td>
+    <td>P0 demo 按 <code>PricePerCall</code> 兜底；P1 加 pricing 兜底表：找不到 model 就按 input/output 字节数估算</td>
+  </tr>
+  <tr>
+    <td>facilitator 不可用</td>
+    <td>全部 402 失败 = 全部业务停摆</td>
+    <td>主用 x402.org，自建 fallback facilitator（go-ethereum 跑 node + EIP-3009 verify 合约）；P1 加 RetryQueue：facilitator 不可达时排队稍后重试</td>
+  </tr>
+  <tr>
+    <td>预估不足导致 hold < 实际</td>
+    <td>欠费（agent 跑了 10x 预估成本的请求）</td>
+    <td>P1 加 per-address 欠费记录，下次请求 402 时强扣；P2 切 upto scheme 让客户端先签 max 授权</td>
+  </tr>
+  <tr>
+    <td>USDC 脱锚（理论上 1 USD = 1 USDC，实际可能 0.998）</td>
+    <td>小额收入积累起来有偏差</td>
+    <td>P1 加 Chainlink USDC/USD 预言机 + 每日 rebase；P0 假设 1:1</td>
+  </tr>
+  <tr>
+    <td>客户端不发 X-Payer / 发假地址</td>
+    <td>无法结算</td>
+    <td>402 强制要求 PAYMENT-SIGNATURE，签名里 recovery 出付款地址（即 X-Payer 也不需要客户端报，由签名推导）</td>
+  </tr>
+  <tr>
+    <td>流式响应中断（client disconnect）时还没收到 usage</td>
+    <td>不知道实际扣多少</td>
+    <td>按 hold 上限扣（P0）；P1 加"流中断也尽量从 partial usage 算"（usageScanner 容忍截断）</td>
+  </tr>
+  <tr>
+    <td>并发同一地址高频请求</td>
+    <td>余额竞态（double-spend）</td>
+    <td>per-address sync.Mutex；debit 走 CAS 重试；P2 走 DB 事务（如果用 SQLite 持久化）</td>
+  </tr>
+  <tr>
+    <td>facilitator 给你返回假 settle（trust）</td>
+    <td>以为扣了钱其实没扣</td>
+    <td>P0 假设 facilitator 诚实（Coinbase / Cloudflare 信誉）；P1 自建 facilitator + 链上事件二次验证</td>
+  </tr>
+</table>
+
+<h2 id="s8"><span class="num">08</span>实施 Roadmap <a href="#s8" class="section-anchor">#</a></h2>
+
+<div class="ascii"><span class="c"># 6 周落地路径</span>
+
+<b>W1 · Demo</b> <span class="acc">★ 必交付</span>
+  ├─ Day 1: 拉代码 + 加 x402-go 依赖 + 写 payment.go (P0-1 ~ P0-4)
+  ├─ Day 2: 配 facilitator + 跑通 1 次 happy path + README 写"how to demo"
+  └─ 交付: <span class="ok">能 curl 调通 402 → sign → 200, USDC 真到账</span>
+
+<b>W2 · 真实 token 计费</b>
+  ├─ 接 usageScanner.tally() 到 debitOnSettle
+  ├─ pricing 集成 (复用 AGW 已有 PricingRule)
+  └─ 交付: <span class="ok">Stats 页能看到每个 payer 的 cost breakdown</span>
+
+<b>W3 · Prepaid UX</b>
+  ├─ wallet.go 余额账本 + JSONL 持久化
+  ├─ paymentGate 支持"余额 > 0 直接扣, 跳过 402"
+  └─ 交付: <span class="ok">agent 充 1 次钱, 100 次调用免签名</span>
+
+<b>W4 · 失败退款 + 并发安全</b>
+  ├─ hold/release/settle 三态机
+  ├─ session.complete 失败回调 → refund
+  └─ 交付: <span class="ok">5xx 耗尽 / 客户端断开 → 自动退钱</span>
+
+<b>W5 · 管理 UI</b>
+  ├─ Payments 标签页
+  ├─ /payments/balance, /payments/history, /payments/deposits API
+  └─ 交付: <span class="ok">运营可看充值/收入/退款榜</span>
+
+<b>W6 · 生产加固</b>
+  ├─ 多链支持 (Base / Avalanche 二选一 by 客户端)
+  ├─ x402 session token (V2 extension)
+  └─ 交付: <span class="ok">可挂公网</span></div>
+
+<h2 id="s9"><span class="num">09</span>参考资料 <a href="#s9" class="section-anchor">#</a></h2>
+
+<h3>9.1 必读</h3>
+<ul class="bullet">
+  <li><a href="https://github.com/btwiuse/agw">btwiuse/agw</a> — 本报告改造对象，单 binary Go 网关，简洁优雅</li>
+  <li><a href="https://github.com/coinbase/x402">coinbase/x402</a> — x402 V2 官方 spec + SDK（Go / TypeScript / Python / Java）</li>
+  <li><a href="https://www.x402.org/">x402.org</a> — 默认 facilitator 入口 + 生态列表</li>
+  <li><a href="https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3009.md">EIP-3009</a> — transferWithAuthorization 规范</li>
+  <li><a href="https://github.com/mark3labs/x402-go">mark3labs/x402-go</a> — 备选 Go SDK（更轻量，136 commits 活跃）</li>
+</ul>
+
+<h3>9.2 生态参考（2026-09 现状）</h3>
+<ul class="bullet">
+  <li><strong>x402 累计数据</strong>：1.65 亿+ 笔交易 / $5000 万+ 累计额 / 69,000 活跃 agent / 22 个 Foundation 成员（AWS, Google, Microsoft, Visa, Mastercard, Stripe, Cloudflare, Coinbase）</li>
+  <li><strong>Stripe 集成</strong>：2026-02 Stripe 推出 x402 on Base 支持，开发者可以用 Stripe API 收 AI agent 的 USDC</li>
+  <li><strong>Google AP2</strong>：2025-Q4 Google Agent Payments Protocol 基于 x402，已集成到 A2A 协议</li>
+  <li><strong>Cloudflare Agents SDK</strong>：2026-02 集成 x402 V2 + MCP，开发者一行代码就能给 MCP tool 加付费墙</li>
+  <li><strong>Nevermined / 1inch</strong>：prepaid balance 模式已生产 1 年+，1inch 12,000+ 客户最低 $2 充，余额可提现</li>
+</ul>
+
+<h3>9.3 Avalanche 相关</h3>
+<ul class="bullet">
+  <li><strong>USDC 合约</strong>（Avalanche C-Chain mainnet）：<code>0xB97EF9EfEbe8734D8E6dB5e3B7e6abC2eC</code>，Circle 官方，6 decimals，EIP-3009 ✓</li>
+  <li><strong>Chain ID</strong>：43114（mainnet），43113（fuji testnet）</li>
+  <li><strong>x402 CAIP-2</strong>：<code>eip155:43114</code>（V2 起 first-class 支持）</li>
+  <li><strong>facilitator</strong>：x402.org 默认 facilitator 支持 Avalanche（社区贡献）</li>
+</ul>
+
+<h2 id="s10"><span class="num">10</span>我的核心判断 <a href="#s10" class="section-anchor">#</a></h2>
+
+<div class="callout">
+  <p><strong>1. AGW 的真正价值不在代理本身，而在它已经攒齐了"成本数据"和"流量观测"。</strong>这是接 x402 区别于从 0 写的关键。70% 的水管已铺好，剩下 30% 的支付层是个 1-2 周能跑出来的小项目，不是几个月的大工程。</p>
+</div>
+<div class="callout">
+  <p><strong>2. x402 + Avalanche 是当下最务实的组合，不是最 fancy 的。</strong>fancy 是 Solana（50-80% 交易量、sub-cent fee）或 Stripe x402 on Base（合规友好）。选 Avalanche 是因为：(a) V2 原生支持 (b) EIP-3009 成熟 (c) 你已经在这个生态里 (d) go-ethereum 工具链现成。如果将来要扩 Base/Solana，CAIP-2 多选项是 x402 的原生能力，加 30 行配置就行。</p>
+</div>
+<div class="callout">
+  <p><strong>3. Prepaid 模式在 demo 阶段比 exact 模式更友好。</strong>Exact 是"每次调用都弹钱包"（agent 跑 100 次调用就弹 100 次），Prepaid 是"充 1 次跑 100 次"。生产两种都要，但 demo 阶段只做 Prepaid 就能覆盖 80% 的展示需求，1 天能跑通。</p>
+</div>
+<div class="callout">
+  <p><strong>4. 最大的隐性风险是"估算不足"。</strong>usageScanner 抓的是上游响应里的 usage，但有些模型（如 Claude 在 thinking 模式下）会把 thinking tokens 算到 cache_creation 里而不是 output_tokens。如果 pricingRule 没配 cache write 单价，thinking 会被当成免费，损失 revenue。P1 阶段务必把所有 cache 路径都审计一遍。</p>
+</div>
+<div class="callout callout-ok">
+  <p><strong>5. 不要低估 UI 价值。</strong>AGW 现有的 Stats 标签页是"运营人员的眼睛"，新加 Payments 标签页会立刻让你看到：谁在付钱、付了多少、退款率、平均 cost/request。这些数据反过来会决定下一步该加什么 — 比如某个 payer 的 cost/request 异常高，是不是该引导它用更便宜的 model selector？</p>
+</div>
+
+<div class="footer">
+  <p>📝 研报基于 AGW commit <code>8f89c26</code>（2026-09-04 最新） · x402 V2 spec（2025-12）· Avalanche C-Chain mainnet（chain ID 43114）</p>
+  <p>如需启动 demo，最快路径：<code>git clone https://github.com/btwiuse/agw && cd agw && git checkout -b feat/x402-payment</code></p>
+  <p>数据截止：2026-09-06 · <a href="https://github.com/btwiuse/agw">btwiuse/agw</a> · <a href="https://www.x402.org/">x402.org</a></p>
+</div>
+
+</div>
+</body>
+</html>

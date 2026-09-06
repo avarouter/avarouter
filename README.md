@@ -1,5 +1,27 @@
 # agw
 
+> **This repo powers [avarouter](https://avarouter.up.railway.app) — the Avalanche Native AI Gateway.** AGW is the underlying Go reverse-proxy / prepaid-LLM-router; the `demo/` and `skills/` subtrees provide a CLI and a Mavis skill for end-user onboarding.
+
+```
+agw/                      ← this repo (single repo, branch x402)
+├── *.go                   ←  server (Go)
+├── cmd/agw/               ←  main
+├── index.html             ←  landing page
+├── og-agw-x402.jpg        ←  OG image
+├── demo/                  ←  local run + CLI source of truth
+│   ├── start.sh
+│   ├── start-mock.sh
+│   └── node/agw-cli/      ←  the `agw` CLI (14 subcommands)
+└── skills/
+    └── agw-onboard/       ←  Mavis SKILL (vendored CLI + examples)
+```
+
+**Repo layout** is a single branch (`x402`); `demo/` and `skills/` are subtrees that the Mavis skill syncer auto-uploads.
+
+---
+
+# agw (orig)
+
 一个按配置顺序尝试上游的 Go HTTP reverse proxy。客户端不需要携带认证信息，代理会根据每个上游的 `authorization` 配置注入 `Authorization` header。
 
 访问 `/` 可以打开基于 HTMX 的配置可视化页面；`/config` 返回可局部刷新的配置表格。认证值默认脱敏，点击“显示”后才在当前页面显示。

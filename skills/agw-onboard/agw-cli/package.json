@@ -1,0 +1,19 @@
+{
+  "name": "agw",
+  "version": "1.0.0",
+  "description": "agw — unified CLI for the AGW (x402 prepaid LLM gateway)",
+  "type": "module",
+  "main": "src/client.mjs",
+  "bin": {
+    "agw": "./bin/agw.mjs"
+  },
+  "scripts": {
+    "agw": "node bin/agw.mjs",
+    "test": "node test/test.mjs"
+  },
+  "dependencies": {
+    "ethers": "^6.17.0"
+  },
+  "keywords": ["agw", "x402", "llm", "gateway", "agent"],
+  "license": "MIT"
+}

@@ -1,2 +1,28 @@
+# Secrets
 config.yaml
 secrets.yaml
+
+# Demo runtime
+demo/data/
+demo/agw
+demo/agw.log
+demo/mock.log
+*.jsonl
+
+# Node
+node_modules/
+**/node_modules/
+package-lock.json
+.npm
+*.tgz
+
+# Editor / OS
+.DS_Store
+*.swp
+.vscode/
+.idea/
+
+# Temp
+*.tmp
+*.pid
+*.log

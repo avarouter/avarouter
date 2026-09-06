@@ -1,0 +1,30 @@
+{
+  "name": "agw-onboard-skill",
+  "version": "1.1.0",
+  "description": "SKILL: onboard a user to AGW (x402 prepaid gateway) and hand them an API key. Provides a single `agw` CLI with 14 subcommands.",
+  "type": "module",
+  "main": "agw-cli/src/client.mjs",
+  "bin": {
+    "agw": "./agw-cli/bin/agw.mjs"
+  },
+  "scripts": {
+    "agw": "node agw-cli/bin/agw.mjs",
+    "topup":    "node agw-cli/bin/agw.mjs topup",
+    "login":    "node agw-cli/bin/agw.mjs login",
+    "mint":     "node agw-cli/bin/agw.mjs mint",
+    "list":     "node agw-cli/bin/agw.mjs keys",
+    "balance":  "node agw-cli/bin/agw.mjs balance",
+    "rotate":   "node agw-cli/bin/agw.mjs rotate",
+    "revoke":   "node agw-cli/bin/agw.mjs revoke",
+    "logout":   "node agw-cli/bin/agw.mjs logout",
+    "users":    "node agw-cli/bin/agw.mjs users",
+    "sessions": "node agw-cli/bin/agw.mjs sessions",
+    "chat":     "node agw-cli/bin/agw.mjs chat",
+    "flow":     "node agw-cli/bin/agw.mjs flow",
+    "config":   "node agw-cli/bin/agw.mjs config",
+    "state":    "node agw-cli/bin/agw.mjs state"
+  },
+  "dependencies": {
+    "ethers": "^6.17.0"
+  }
+}

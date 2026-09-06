@@ -1,0 +1,13 @@
+{
+  "name": "agw-x402-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Node.js test client for AGW x402 prepaid gateway (single-user mode)",
+  "scripts": {
+    "start": "node client.mjs"
+  },
+  "dependencies": {
+    "ethers": "^6.13.0"
+  }
+}
