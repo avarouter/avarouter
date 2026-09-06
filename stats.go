@@ -1651,7 +1651,7 @@ __STYLE__
       <h2 class="sr-only" id="workspace-title">Workspace</h2>
       <div class="telemetry-top">
         <div class="identity">
-          <div class="brand-mark" title="AGW">AGW</div>
+          <div class="brand-mark" title="AGW"><img src="/favicon.svg" alt="AGW" width="34" height="34"></div>
         </div>
         <div class="telemetry-tabbar" role="tablist" aria-label="工作区视图"><button class="telemetry-tab" type="button" role="tab" aria-selected="true"><span class="live-dot"></span><span>Stats</span></button></div>
         <div class="appbar-actions">

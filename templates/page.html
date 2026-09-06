@@ -49,7 +49,8 @@
     .telemetry-top.hamburger-mode .telemetry-tab { height: auto; min-height: 38px; margin: 0; border: 0; border-radius: 6px; }
     .telemetry-top.hamburger-mode .telemetry-tab[aria-selected="true"] { border: 0; box-shadow: none; }
     .identity { display: flex; align-items: center; gap: 12px; min-width: 0; }
-    .brand-mark { display: grid; width: 34px; height: 34px; place-items: center; flex: 0 0 34px; color: #17302b; background: #cbe86b; border-radius: 6px; font-size: 12px; font-weight: 800; letter-spacing: 0; }
+    .brand-mark { display: inline-grid; width: 34px; height: 34px; place-items: center; flex: 0 0 34px; border-radius: 6px; overflow: hidden; }
+    .brand-mark img { display: block; width: 100%; height: 100%; }
     .appbar-actions { display: flex; align-items: center; gap: 8px; }
     .debug-toggle { display: inline-flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 8px; color: #d7e6e1; cursor: pointer; font-size: 13px; white-space: nowrap; }
     .debug-toggle input { position: absolute; opacity: 0; pointer-events: none; }
@@ -499,7 +500,7 @@
       <div class="telemetry-top">
         <button class="tab-menu-button" type="button" data-tab-menu-button aria-label="切换视图" aria-expanded="false" aria-haspopup="menu"><i data-lucide="menu"></i></button>
         <div class="identity">
-          <div class="brand-mark" title="AGW">AGW</div>
+          <div class="brand-mark" title="AGW"><img src="/favicon.svg" alt="AGW" width="34" height="34"></div>
         </div>
         <div class="telemetry-tabbar" role="tablist" aria-label="工作区视图"><button class="telemetry-tab" type="button" role="tab" id="selectors-tab" aria-selected="true" aria-controls="selectors-panel" data-telemetry-tab="selectors"><span class="live-dot"></span><span>AppSelector</span><span class="tab-count" data-selector-tab-count>0</span></button><button class="telemetry-tab" type="button" role="tab" id="routing-tab" aria-selected="false" aria-controls="routing-panel" data-telemetry-tab="routing"><span class="live-dot"></span><span>Routing</span><span class="tab-count" data-upstream-tab-count>0</span></button><button class="telemetry-tab" type="button" role="tab" id="pricing-tab" aria-selected="false" aria-controls="pricing-panel" data-telemetry-tab="pricing"><span class="live-dot"></span><span>Pricing</span></button><button class="telemetry-tab" type="button" role="tab" id="sessions-tab" aria-selected="false" aria-controls="sessions-panel" data-telemetry-tab="sessions"><span class="live-dot"></span><span>Sessions</span><span class="tab-count" data-session-count>0</span></button><button class="telemetry-tab" type="button" role="tab" id="stats-tab" aria-selected="false" aria-controls="stats-panel" data-telemetry-tab="stats"><span class="live-dot"></span><span>Stats</span></button><button class="telemetry-tab" type="button" role="tab" id="logs-tab" aria-selected="false" aria-controls="logs-panel" data-telemetry-tab="logs"><span class="live-dot"></span><span>Logs</span><span class="tab-count" data-log-count>0</span></button></div>
         <div class="appbar-actions">
