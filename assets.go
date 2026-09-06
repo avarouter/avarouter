@@ -6,12 +6,11 @@ import (
 	"strings"
 )
 
-//go:embed favicon.ico favicon.svg icon-192.png icon-512.png manifest.json
+//go:embed favicon.ico icon-192.png icon-512.png manifest.json
 var pwaAssets embed.FS
 
 var pwaContentTypes = map[string]string{
 	"/favicon.ico":   "image/x-icon",
-	"/favicon.svg":   "image/svg+xml",
 	"/icon-192.png":  "image/png",
 	"/icon-512.png":  "image/png",
 	"/manifest.json": "application/manifest+json; charset=utf-8",

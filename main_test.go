@@ -2165,7 +2165,6 @@ func TestPWAAssetsServed(t *testing.T) {
 	}{
 		{"/manifest.json", "application/manifest+json"},
 		{"/favicon.ico", "image/x-icon"},
-		{"/favicon.svg", "image/svg+xml"},
 		{"/icon-192.png", "image/png"},
 		{"/icon-512.png", "image/png"},
 	}
