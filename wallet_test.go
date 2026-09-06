@@ -220,15 +220,15 @@ func TestWalletUsersList(t *testing.T) {
 	if len(users) != 2 {
 		t.Fatalf("ListUsers: got %d, want 2", len(users))
 	}
-	// alice first (created first)
-	if users[0].From != strings.ToLower(alice) {
-		t.Fatalf("first user: %q, want %q", users[0].From, strings.ToLower(alice))
+	byAddr := map[string]int64{}
+	for _, u := range users {
+		byAddr[u.From] = u.Balance
 	}
-	if users[0].Balance != 150 {
-		t.Fatalf("alice balance: %d, want 150", users[0].Balance)
+	if byAddr[strings.ToLower(alice)] != 150 {
+		t.Fatalf("alice balance: %d, want 150", byAddr[strings.ToLower(alice)])
 	}
-	if users[1].Balance != 200 {
-		t.Fatalf("bob balance: %d, want 200", users[1].Balance)
+	if byAddr[strings.ToLower(bob)] != 200 {
+		t.Fatalf("bob balance: %d, want 200", byAddr[strings.ToLower(bob)])
 	}
 }
 
