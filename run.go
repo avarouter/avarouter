@@ -39,6 +39,16 @@ type Options struct {
 	// log feed survive restarts. Empty keeps sessions in memory and payloads
 	// in a temporary directory.
 	DataDir string
+
+	// Prepaid payment options (x402 V2 / Avalanche USDC). When PayTo is
+	// empty, the gateway runs in legacy mode and never charges callers.
+	// When PayTo is set, /v1/topup accepts EIP-3009 signed deposits and
+	// every other request requires X-Payer + positive balance.
+	PayTo         string // server's payout address (must match USDC transfers)
+	USDCAddress   string // defaults to Fuji USDC if empty
+	USDCRPCURL    string // defaults to Fuji public RPC if empty
+	USDCChainID   int64  // defaults to 43113 (Fuji) if 0
+	ServerKeyPath string // path to hex-encoded ECDSA private key; empty = offline mode (verify only, no on-chain settlement)
 }
 
 // DefaultListenAddress derives the listen address from PORT, falling back to
@@ -125,6 +135,15 @@ func RunWithOptions(opts Options) error {
 		sessions.setPricing(settings.Pricing)
 	}
 
+	// Prepaid payment wiring (x402). Activated when PayTo is set.
+	if opts.PayTo != "" {
+		if err := initPayment(proxy, &opts, logger); err != nil {
+			return err
+		}
+	} else {
+		logger.Info("payments disabled (no --pay-to set); gateway runs in legacy mode")
+	}
+
 	if adminUser != "" {
 		logger.Info("management auth enabled", "username", adminUser)
 	}
@@ -206,6 +225,11 @@ func Run(args []string) error {
 	flags.StringVar(&opts.DataDir, "data-dir", "", "persist sessions, payloads and logs to this directory")
 	flags.StringVar(&opts.AdminUser, "admin-user", "", "Basic Auth username for the management UI (env: AGW_ADMIN_USER; must be paired with --admin-password)")
 	flags.StringVar(&opts.AdminPassword, "admin-password", "", "Basic Auth password for the management UI (env: AGW_ADMIN_PASSWORD)")
+	flags.StringVar(&opts.PayTo, "pay-to", "", "enable payments: server's payout address (EIP-3009 transferWithAuthorization destination). Empty disables.")
+	flags.StringVar(&opts.USDCAddress, "usdc-address", "", "USDC contract address (default: Fuji testnet)")
+	flags.StringVar(&opts.USDCRPCURL, "usdc-rpc", "", "EVM RPC URL for settlement (default: Fuji public RPC)")
+	flags.Int64Var(&opts.USDCChainID, "usdc-chain-id", 0, "EVM chain id (default: 43113)")
+	flags.StringVar(&opts.ServerKeyPath, "usdc-server-key", "", "path to hex ECDSA private key for submitting transferWithAuthorization; empty = offline mode")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(os.Stdout)

@@ -141,6 +141,15 @@ type Proxy struct {
 	Pricing      []PricingRule
 	SecretValues map[string]string
 	Mu           sync.RWMutex
+
+	// Prepaid payment (x402 / Avalanche USDC). Wallet is the balance
+	// ledger; USDC configures the on-chain settlement side; PayTo is
+	// the server's payout address that must match USDC.BuildRequirements.
+	// When Wallet is nil, the gateway runs in legacy mode and never
+	// charges callers.
+	Wallet *Wallet
+	USDC   *USDC
+	PayTo  string
 }
 
 // ConfigStore persists the gateway configuration. The file-backed
@@ -1161,6 +1170,35 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if (r.URL.Path == "/config" || r.URL.Path == "/config/yaml") && r.Method == http.MethodPut {
 		p.updateConfig(w, r)
 		return
+	}
+
+	// x402 topup endpoint — bypasses the payment gate (it IS the
+	// payment). Always returns x402 PaymentRequirements on the first
+	// round-trip, then verifies signature and credits balance on the
+	// second round-trip.
+	if r.URL.Path == "/v1/topup" {
+		p.serveTopup(w, r)
+		return
+	}
+	// Public balance query endpoints — bypass the payment gate but
+	// still subject to general rate limiting (P1).
+	if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/payments/balance/") {
+		p.servePaymentsBalance(w, r)
+		return
+	}
+	if r.URL.Path == "/payments/balances" && r.Method == http.MethodGet {
+		p.servePaymentsBalances(w, r)
+		return
+	}
+
+	// Prepaid payment gate: require X-Payer and reserve a hold against
+	// the wallet. Refund on failure, settle on success (see defer below).
+	_, holdID, writeError, _ := p.paymentGate(w, r)
+	if writeError {
+		return
+	}
+	if holdID != "" {
+		defer p.settleOrRefund(holdID, w)
 	}
 
 	body, err := io.ReadAll(r.Body)

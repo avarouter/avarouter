@@ -52,6 +52,13 @@ func newRootCommand(opts *agw.Options, defaultAddr, invalidPort string, logger *
 	flags.StringVar(&opts.DataDir, "data-dir", "", "persist sessions, payloads and logs to this directory")
 	flags.StringVar(&opts.AdminUser, "admin-user", "", "Basic Auth username for the management UI (env: AGW_ADMIN_USER; must be paired with --admin-password)")
 	flags.StringVar(&opts.AdminPassword, "admin-password", "", "Basic Auth password for the management UI (env: AGW_ADMIN_PASSWORD)")
+	// Prepaid payment flags (x402 / Avalanche USDC). When --pay-to is
+	// omitted the gateway runs in legacy mode and never charges callers.
+	flags.StringVar(&opts.PayTo, "pay-to", "", "enable payments: server's payout address (EIP-3009 transferWithAuthorization destination). Empty disables.")
+	flags.StringVar(&opts.USDCAddress, "usdc-address", "", "USDC contract address (default: Fuji testnet 0x5425890298aed601595a70AB815c96711a31Bc65)")
+	flags.StringVar(&opts.USDCRPCURL, "usdc-rpc", "", "EVM RPC URL for settlement (default: https://api.avax-test.network/ext/bc/C/rpc)")
+	flags.Int64Var(&opts.USDCChainID, "usdc-chain-id", 0, "EVM chain id (default: 43113 Avalanche Fuji testnet)")
+	flags.StringVar(&opts.ServerKeyPath, "usdc-server-key", "", "path to hex ECDSA private key for submitting transferWithAuthorization; empty = offline mode (verify signature only)")
 	// Keep accepting single-dash long flags (-config) as the original CLI did;
 	// pflag would otherwise read them as shorthand clusters.
 	root.SetArgs(normalizeArgs(os.Args[1:]))
@@ -61,7 +68,7 @@ func newRootCommand(opts *agw.Options, defaultAddr, invalidPort string, logger *
 // normalizeArgs rewrites known long flags written with a single dash into
 // double-dash form so Go-style invocations like -config keep working.
 func normalizeArgs(args []string) []string {
-	longFlags := map[string]bool{"config": true, "listen": true, "timeout": true, "allow-debug": true, "log-stderr": true, "admin-user": true, "admin-password": true, "dev": true, "data-dir": true}
+	longFlags := map[string]bool{"config": true, "listen": true, "timeout": true, "allow-debug": true, "log-stderr": true, "admin-user": true, "admin-password": true, "dev": true, "data-dir": true, "pay-to": true, "usdc-address": true, "usdc-rpc": true, "usdc-chain-id": true, "usdc-server-key": true}
 	out := make([]string, 0, len(args))
 	for _, arg := range args {
 		if strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") {
