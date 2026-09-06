@@ -8,10 +8,16 @@ import (
 	"time"
 )
 
+// Test addresses — these are paired with the priv keys below so
+// the manage-auth tests can sign on their behalf. The key+address
+// pairs are real (secp256k1-derived), the values just look like
+// hex.
 const (
-	alice = "0xABCDEF1234567890ABCDEF1234567890ABCDEF12"
-	bob   = "0x1234567890ABCDEF1234567890ABCDEF12345678"
-	carol = "0x9999999999999999999999999999999999999999"
+	alice       = "0xa4da2ab7a6dcd8d60030900e95027aaa3af22d18"
+	alicePriv   = "4caaf54b1f52fc5940a87be6198229afb450e91d4c2703581ca8d028e66fbce6"
+	bob         = "0x2c125abfad46eadcd323ce64d8ed1f9c6ba29c56"
+	bobPriv     = "20e790bcec70cda7fd671f7d3b779722fd709cd73a8c15b77c77cca71a026f43"
+	carol       = "0x9999999999999999999999999999999999999999"
 )
 
 func TestWalletCreditDebit(t *testing.T) {
@@ -81,14 +87,14 @@ func TestWalletKeyGenerateLookupRotate(t *testing.T) {
 	if !meta.Active {
 		t.Fatal("newly issued key should be active")
 	}
-	if meta.Owner != "0xabcdef1234567890abcdef1234567890abcdef12" {
+	if meta.Owner != "0xa4da2ab7a6dcd8d60030900e95027aaa3af22d18" {
 		t.Fatalf("meta.Owner: got %q, want normalized alice", meta.Owner)
 	}
 	owner, err := w.LookupKey(plain)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if owner != "0xabcdef1234567890abcdef1234567890abcdef12" {
+	if owner != "0xa4da2ab7a6dcd8d60030900e95027aaa3af22d18" {
 		t.Fatalf("LookupKey: owner=%q err=%v", owner, err)
 	}
 

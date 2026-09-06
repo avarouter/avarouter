@@ -49,13 +49,15 @@ func (p *Proxy) serveTopup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	payer := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Payer")))
+	// Every topup request must carry a per-request EIP-191 signature
+	// from the user (X-Payer + X-AGW-Timestamp + X-AGW-Signature).
+	// This is what binds "I am 0xAlice" to the actual HTTP request
+	// and prevents header-spoofing. The signature is required on
+	// BOTH the 402 challenge call and the credit call — though
+	// for the credit call, we additionally verify the EIP-3009
+	// payment signature (proves control of USDC funds).
+	payer := p.verifyManagementSignature(w, r, false)
 	if payer == "" {
-		http.Error(w, "X-Payer header required (your from address)", http.StatusBadRequest)
-		return
-	}
-	if _, err := normalizeAddr(payer); err != nil {
-		http.Error(w, "invalid X-Payer: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 

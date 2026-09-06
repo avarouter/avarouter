@@ -17,21 +17,16 @@ import (
 	"strings"
 )
 
-// requireUserPayer gates the management endpoints: X-Payer must be
-// a valid EVM address. The user need not be registered yet (topup
-// will auto-register), but key/rotate endpoints also auto-register
-// defensively.
-func (p *Proxy) requireUserPayer(w http.ResponseWriter, r *http.Request) string {
-	xp := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Payer")))
-	if xp == "" {
-		writeAuthError(w, "X-Payer header required (your from address)")
+// requireUserSigned gates the management endpoints with a per-request
+// EIP-191 signature (see manage_auth.go). requireRegistered is
+// passed through; keys endpoints require registration, topup does
+// not.
+func (p *Proxy) requireUserSigned(w http.ResponseWriter, r *http.Request, requireRegistered bool) string {
+	if p.Wallet == nil {
+		http.Error(w, "payments not enabled", http.StatusServiceUnavailable)
 		return ""
 	}
-	if _, err := normalizeAddr(xp); err != nil {
-		writeAuthError(w, "invalid X-Payer: "+err.Error())
-		return ""
-	}
-	return xp
+	return p.verifyManagementSignature(w, r, requireRegistered)
 }
 
 // serveKeys dispatches GET (list) and POST (generate) for /v1/keys.
@@ -40,7 +35,7 @@ func (p *Proxy) serveKeys(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "payments not enabled", http.StatusServiceUnavailable)
 		return
 	}
-	user := p.requireUserPayer(w, r)
+	user := p.requireUserSigned(w, r, true)
 	if user == "" {
 		return
 	}
@@ -56,13 +51,13 @@ func (p *Proxy) serveKeys(w http.ResponseWriter, r *http.Request) {
 
 // serveKeyByPrefix handles per-key operations keyed by the
 // 8-char prefix. Currently supports DELETE for granular revoke.
-// Only the key's owner (X-Payer) can revoke it.
+// Only the key's owner (signed X-Payer) can revoke it.
 func (p *Proxy) serveKeyByPrefix(w http.ResponseWriter, r *http.Request) {
 	if p.Wallet == nil {
 		http.Error(w, "payments not enabled", http.StatusServiceUnavailable)
 		return
 	}
-	user := p.requireUserPayer(w, r)
+	user := p.requireUserSigned(w, r, true)
 	if user == "" {
 		return
 	}
@@ -108,7 +103,7 @@ func (p *Proxy) serveKeysRotate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	user := p.requireUserPayer(w, r)
+	user := p.requireUserSigned(w, r, true)
 	if user == "" {
 		return
 	}
