@@ -95,6 +95,27 @@ func (p *Proxy) servePaymentsBalance(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// (c2) X-AGW-Session — the session owner's balance
+	if s := r.Header.Get("X-AGW-Session"); s != "" {
+		ss := p.Wallet.Sessions()
+		if ss != nil {
+			if rec, err := ss.Lookup(s); err == nil {
+				userAddr := strings.ToLower(rec.User)
+				snap, _ := p.Wallet.Snapshot(userAddr)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"from":        snap.From,
+					"payTo":       snap.PayTo,
+					"balance":     snap.Balance,
+					"balanceUSDC": float64(snap.Balance) / 1_000_000.0,
+					"created":     snap.Created,
+					"updated":     snap.Updated,
+					"registered":  snap.Active,
+				})
+				return
+			}
+		}
+	}
+
 	// (d) No auth — aggregate
 	users := p.Wallet.ListUsers()
 	var total int64
