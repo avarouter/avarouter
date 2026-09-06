@@ -1,11 +1,16 @@
-// topup.go — POST /v1/topup is the single x402-protected endpoint in
-// this gateway. It accepts an EIP-3009 signed authorization, verifies
-// the signature, optionally settles on-chain, and credits the
-// owner's internal balance.
+// topup.go — POST /v1/topup is the single x402-protected endpoint.
 //
-// In single-user mode, the X-Payer must match the locked owner
-// address (set via --pay-to). This prevents anyone from topping up
-// someone else's balance.
+// Multi-tenant design:
+//   - X-Payer is the user's `from` address. Any valid address is
+//     accepted (open registration).
+//   - On the first call (no payment yet), the 402 challenge uses
+//     the user's existing payTo if they're already registered, or
+//     the `payTo` field from the request body (defaulting to the
+//     `from` address itself).
+//   - When the client submits the signed payment, the server
+//     auto-registers the user with payTo = auth.To (or keeps the
+//     existing one if it matches), verifies the EIP-3009 signature,
+//     optionally settles on-chain, and credits the user's balance.
 package agw
 
 import (
@@ -18,20 +23,20 @@ import (
 )
 
 // TopupRequest is the client-side body for POST /v1/topup.
-//
-// Amount is the requested credit in USDC micro-units. Payment (optional
-// in the first round-trip) is the EIP-3009 signed authorization.
 type TopupRequest struct {
 	Amount  string       `json:"amount"`
+	PayTo   string       `json:"payTo,omitempty"` // optional: only used on first 402 to specify deposit addr
 	Payment *PaymentAuth `json:"payment,omitempty"`
 }
 
 // TopupResponse is the success body after a topup completes.
 type TopupResponse struct {
-	OK      bool   `json:"ok"`
-	Balance string `json:"balance"`
-	TxHash  string `json:"txHash,omitempty"`
-	Note    string `json:"note,omitempty"`
+	OK       bool   `json:"ok"`
+	Balance  string `json:"balance"`
+	TxHash   string `json:"txHash,omitempty"`
+	Note     string `json:"note,omitempty"`
+	User     string `json:"user,omitempty"`
+	PayTo    string `json:"payTo,omitempty"`
 }
 
 func (p *Proxy) serveTopup(w http.ResponseWriter, r *http.Request) {
@@ -46,16 +51,11 @@ func (p *Proxy) serveTopup(w http.ResponseWriter, r *http.Request) {
 
 	payer := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Payer")))
 	if payer == "" {
-		http.Error(w, "X-Payer header required", http.StatusBadRequest)
+		http.Error(w, "X-Payer header required (your from address)", http.StatusBadRequest)
 		return
 	}
 	if _, err := normalizeAddr(payer); err != nil {
 		http.Error(w, "invalid X-Payer: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-	// Single-user mode: only the locked owner can topup.
-	if payer != p.Wallet.Addr() {
-		http.Error(w, "X-Payer does not match this server's owner", http.StatusForbidden)
 		return
 	}
 
@@ -76,18 +76,36 @@ func (p *Proxy) serveTopup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `missing "amount" (USDC micro-units)`, http.StatusBadRequest)
 		return
 	}
+	amount, ok := parsePositiveInt(req.Amount)
+	if !ok {
+		http.Error(w, `invalid "amount"`, http.StatusBadRequest)
+		return
+	}
+
+	// Resolve the payTo address for the 402 challenge.
+	//
+	// Priority: 1) explicit `payTo` in the request body, 2) existing
+	// user's registered payTo, 3) the user's `from` (self-custody).
+	payTo := strings.ToLower(strings.TrimSpace(req.PayTo))
+	if payTo == "" {
+		if u, ok := p.Wallet.GetUser(payer); ok {
+			payTo = u.PayTo
+		}
+	}
+	if payTo == "" {
+		payTo = payer
+	}
+	if _, err := normalizeAddr(payTo); err != nil {
+		http.Error(w, "invalid payTo: "+err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	// No payment yet → emit 402
 	if req.Payment == nil {
-		amount, ok := parsePositiveInt(req.Amount)
-		if !ok {
-			http.Error(w, `invalid "amount"`, http.StatusBadRequest)
-			return
-		}
 		requirements, nonce, err := p.USDC.BuildRequirements(
 			"/v1/topup",
 			"AGW prepaid topup (USDC on "+p.USDC.CAIP2()+")",
-			p.PayTo,
+			payTo,
 			amount,
 		)
 		if err != nil {
@@ -105,13 +123,8 @@ func (p *Proxy) serveTopup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Payment present → verify + settle + credit
+	// Payment present → verify + (auto-register) + settle + credit
 	auth := *req.Payment
-	amount, ok := parsePositiveInt(req.Amount)
-	if !ok {
-		http.Error(w, `invalid "amount"`, http.StatusBadRequest)
-		return
-	}
 	expectedValue, ok := parsePositiveInt(auth.Value)
 	if !ok {
 		http.Error(w, "payment.value invalid", http.StatusBadRequest)
@@ -121,8 +134,20 @@ func (p *Proxy) serveTopup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "payment.value does not match requested amount", http.StatusBadRequest)
 		return
 	}
-	if !strings.EqualFold(strings.TrimPrefix(auth.To, "0x"), strings.TrimPrefix(p.PayTo, "0x")) {
+	// auth.from must equal X-Payer (proves ownership)
+	if !strings.EqualFold(strings.TrimPrefix(auth.From, "0x"), strings.TrimPrefix(payer, "0x")) {
+		http.Error(w, "payment.from does not match X-Payer", http.StatusBadRequest)
+		return
+	}
+	// auth.to must equal the payTo we promised in the 402
+	if !strings.EqualFold(strings.TrimPrefix(auth.To, "0x"), strings.TrimPrefix(payTo, "0x")) {
 		http.Error(w, "payment.to does not match server payTo", http.StatusBadRequest)
+		return
+	}
+
+	// Auto-register the user (idempotent: returns existing if known).
+	if _, err := p.Wallet.RegisterUser(payer, payTo); err != nil {
+		http.Error(w, "register user: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -145,14 +170,12 @@ func (p *Proxy) serveTopup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		// Offline mode: trust the signed authorization. Acceptable for
-		// demo only; production must settle on-chain.
 		p.Logger.Warn("topup accepted without on-chain settlement (offline mode)",
 			"payer", payer, "amount", amount)
 	}
 
-	// Credit wallet
-	newBal, err := p.Wallet.Credit(amount, "x402 topup", txHash)
+	// Credit user's balance.
+	newBal, err := p.Wallet.Credit(payer, amount, "x402 topup", txHash)
 	if err != nil {
 		p.Logger.Error("wallet credit failed", "payer", payer, "error", err.Error())
 		http.Error(w, "credit failed: "+err.Error(), http.StatusInternalServerError)
@@ -162,7 +185,13 @@ func (p *Proxy) serveTopup(w http.ResponseWriter, r *http.Request) {
 		"payer", payer, "amount", amount, "balance", newBal, "txHash", txHash)
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	resp := TopupResponse{OK: true, Balance: formatInt(newBal), TxHash: txHash}
+	resp := TopupResponse{
+		OK:      true,
+		Balance: formatInt(newBal),
+		TxHash:  txHash,
+		User:    payer,
+		PayTo:   payTo,
+	}
 	if p.USDC.ServerKey == nil {
 		resp.Note = "offline mode: signature verified but not settled on-chain"
 	}
@@ -176,7 +205,6 @@ func (p *Proxy) logTopupChallenge(payer string, amount int64, nonce [32]byte) {
 		"nonce", "0x"+encodeNonce(nonce[:]),
 		"network", p.USDC.CAIP2(),
 		"asset", p.USDC.Address.Hex(),
-		"payTo", p.PayTo,
 	)
 }
 

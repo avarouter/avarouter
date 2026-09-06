@@ -1196,15 +1196,14 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p.servePaymentsBalance(w, r)
 		return
 	}
-	// Per-key stats: how much each API key has spent. Owner-only.
+	// Per-user rollup — open (no auth in MVP).
+	if r.URL.Path == "/payments/users" && r.Method == http.MethodGet {
+		p.servePaymentsUsers(w, r)
+		return
+	}
+	// Per-key stats: how much each API key has spent. Open, with
+	// optional ?user=0x... filter.
 	if r.URL.Path == "/payments/keys" && r.Method == http.MethodGet {
-		if p.Wallet == nil {
-			http.Error(w, "payments not enabled", http.StatusServiceUnavailable)
-			return
-		}
-		if !p.requireOwnerPayer(w, r) {
-			return
-		}
 		p.servePaymentsKeys(w, r)
 		return
 	}

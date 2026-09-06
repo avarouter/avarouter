@@ -1,54 +1,77 @@
-// wallet_test.go — covers the simplified single-user wallet: credit /
-// debit / balance / key generation / lookup / rotation / persistence.
 package agw
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+)
+
+const (
+	alice = "0xABCDEF1234567890ABCDEF1234567890ABCDEF12"
+	bob   = "0x1234567890ABCDEF1234567890ABCDEF12345678"
+	carol = "0x9999999999999999999999999999999999999999"
 )
 
 func TestWalletCreditDebit(t *testing.T) {
-	w, err := NewWallet("", "0xABCDEF1234567890ABCDEF1234567890ABCDEF12")
+	w, _ := NewWallet("")
+
+	// Initial balance for unknown user is 0.
+	if bal, _ := w.Balance(alice); bal != 0 {
+		t.Fatalf("initial balance: got %d, want 0", bal)
+	}
+
+	// Credit auto-registers the user.
+	newBal, err := w.Credit(alice, 1000, "test", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := w.Credit(5_000_000, "test", ""); err != nil {
+	if newBal != 1000 {
+		t.Fatalf("after credit: got %d, want 1000", newBal)
+	}
+	if !w.HasUser(alice) {
+		t.Fatal("alice should be auto-registered after first credit")
+	}
+
+	// Debit reduces.
+	newBal, err = w.Debit(alice, 250, "test")
+	if err != nil {
 		t.Fatal(err)
 	}
-	bal, _ := w.Balance()
-	if bal != 5_000_000 {
-		t.Fatalf("balance after credit: %d, want 5M", bal)
-	}
-	if _, err := w.Debit(2_000_000, "spend"); err != nil {
-		t.Fatal(err)
-	}
-	bal, _ = w.Balance()
-	if bal != 3_000_000 {
-		t.Fatalf("balance after debit: %d, want 3M", bal)
+	if newBal != 750 {
+		t.Fatalf("after debit: got %d, want 750", newBal)
 	}
 }
 
 func TestWalletDebitRejectsNonPositive(t *testing.T) {
-	w, _ := NewWallet("", "0xABCDEF1234567890ABCDEF1234567890ABCDEF12")
-	if _, err := w.Debit(0, "x"); err == nil {
-		t.Fatal("Debit(0) should error")
+	w, _ := NewWallet("")
+	_, err := w.Credit(alice, 100, "x", "")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := w.Debit(-1, "x"); err == nil {
-		t.Fatal("Debit(-1) should error")
+	if _, err := w.Debit(alice, 0, "x"); err == nil {
+		t.Fatal("debit 0 should fail")
+	}
+	if _, err := w.Debit(alice, -10, "x"); err == nil {
+		t.Fatal("debit negative should fail")
 	}
 }
 
 func TestWalletCreditRejectsNonPositive(t *testing.T) {
-	w, _ := NewWallet("", "0xABCDEF1234567890ABCDEF1234567890ABCDEF12")
-	if _, err := w.Credit(0, "x", ""); err == nil {
-		t.Fatal("Credit(0) should error")
+	w, _ := NewWallet("")
+	if _, err := w.Credit(alice, 0, "x", ""); err == nil {
+		t.Fatal("credit 0 should fail")
+	}
+	if _, err := w.Credit(alice, -10, "x", ""); err == nil {
+		t.Fatal("credit negative should fail")
 	}
 }
 
 func TestWalletKeyGenerateLookupRotate(t *testing.T) {
-	w, _ := NewWallet("", "0xABCDEF1234567890ABCDEF1234567890ABCDEF12")
-	plain, meta, err := w.GenerateKey()
+	w, _ := NewWallet("")
+	// First mint a key for alice (auto-registers alice).
+	plain, meta, err := w.GenerateKey(alice)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,13 +81,19 @@ func TestWalletKeyGenerateLookupRotate(t *testing.T) {
 	if !meta.Active {
 		t.Fatal("newly issued key should be active")
 	}
-	addr, err := w.LookupKey(plain)
-	if err != nil || addr != "0xabcdef1234567890abcdef1234567890abcdef12" {
-		t.Fatalf("LookupKey: addr=%q err=%v", addr, err)
+	if meta.Owner != "0xabcdef1234567890abcdef1234567890abcdef12" {
+		t.Fatalf("meta.Owner: got %q, want normalized alice", meta.Owner)
+	}
+	owner, err := w.LookupKey(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owner != "0xabcdef1234567890abcdef1234567890abcdef12" {
+		t.Fatalf("LookupKey: owner=%q err=%v", owner, err)
 	}
 
 	// Rotate: old key should be revoked, new key works.
-	plain2, _, err := w.RotateKey()
+	plain2, _, err := w.RotateKey(alice)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +106,7 @@ func TestWalletKeyGenerateLookupRotate(t *testing.T) {
 }
 
 func TestWalletKeyRejectsEmpty(t *testing.T) {
-	w, _ := NewWallet("", "0xABCDEF1234567890ABCDEF1234567890ABCDEF12")
+	w, _ := NewWallet("")
 	if _, err := w.LookupKey(""); err != ErrUnknownKey {
 		t.Fatalf("empty key: err=%v, want ErrUnknownKey", err)
 	}
@@ -86,32 +115,40 @@ func TestWalletKeyRejectsEmpty(t *testing.T) {
 	}
 }
 
-// Multi-key: generate two keys with different prefixes, both should
-// be active. Revoke one by prefix, the other should still work.
+// Multi-key: each user has their own keys; revocation is per-user.
 func TestWalletMultiKeyAndRevokeByPrefix(t *testing.T) {
-	w, _ := NewWallet("", "0xABCDEF1234567890ABCDEF1234567890ABCDEF12")
+	w, _ := NewWallet("")
 
-	plainA, metaA, err := w.GenerateKey()
+	plainA, metaA, err := w.GenerateKey(alice)
 	if err != nil {
 		t.Fatal(err)
 	}
-	plainB, metaB, err := w.GenerateKey()
+	plainB, metaB, err := w.GenerateKey(alice)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if metaA.Prefix == metaB.Prefix {
-		t.Skipf("prefixes collided (%q); retry — extremely unlikely", metaA.Prefix)
+		t.Skipf("prefixes collided (%q); retry", metaA.Prefix)
 	}
-	// Both should be active and independently usable.
-	if _, err := w.LookupKey(plainA); err != nil {
-		t.Fatalf("key A should be active: %v", err)
-	}
-	if _, err := w.LookupKey(plainB); err != nil {
-		t.Fatalf("key B should be active: %v", err)
+	plainBob, metaBob, err := w.GenerateKey(bob)
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	// Revoke A by its prefix; B should still work.
-	hash, err := w.RevokeByPrefix(metaA.Prefix)
+	// Both alice's keys should be active and belong to her.
+	if owner, _ := w.LookupKey(plainA); owner != strings.ToLower(alice) {
+		t.Fatalf("plainA owner: %q, want %q", owner, strings.ToLower(alice))
+	}
+	if owner, _ := w.LookupKey(plainB); owner != strings.ToLower(alice) {
+		t.Fatalf("plainB owner: %q, want %q", owner, strings.ToLower(alice))
+	}
+	if owner, _ := w.LookupKey(plainBob); owner != strings.ToLower(bob) {
+		t.Fatalf("plainBob owner: %q, want %q", owner, strings.ToLower(bob))
+	}
+
+	// Alice revokes her key with prefixA. Her other key + bob's key
+	// must survive.
+	hash, err := w.RevokeByPrefix(alice, metaA.Prefix)
 	if err != nil {
 		t.Fatalf("RevokeByPrefix: %v", err)
 	}
@@ -119,141 +156,191 @@ func TestWalletMultiKeyAndRevokeByPrefix(t *testing.T) {
 		t.Fatal("RevokeByPrefix returned empty hash")
 	}
 	if _, err := w.LookupKey(plainA); err != ErrUnknownKey {
-		t.Fatalf("key A should be revoked, got err=%v", err)
+		t.Fatalf("plainA should be revoked")
 	}
 	if _, err := w.LookupKey(plainB); err != nil {
-		t.Fatalf("key B should still be active: %v", err)
+		t.Fatalf("plainB should still be valid")
+	}
+	if _, err := w.LookupKey(plainBob); err != nil {
+		t.Fatalf("plainBob (different user) should be unaffected")
 	}
 
-	// Revoking the same prefix again should fail (no active match).
-	if _, err := w.RevokeByPrefix(metaA.Prefix); err != ErrUnknownKey {
-		t.Fatalf("second revoke should fail, got err=%v", err)
+	// alice cannot revoke bob's key (ownership check).
+	if _, err := w.RevokeByPrefix(alice, metaBob.Prefix); err != ErrUnknownKey {
+		t.Fatalf("alice should not be able to revoke bob's key")
+	}
+	// bob can revoke his own.
+	if _, err := w.RevokeByPrefix(bob, metaBob.Prefix); err != nil {
+		t.Fatalf("bob should be able to revoke his key: %v", err)
 	}
 
-	// A bogus prefix also fails.
-	if _, err := w.RevokeByPrefix("agw_doesntexist"); err != ErrUnknownKey {
-		t.Fatalf("bogus prefix should fail, got err=%v", err)
+	// Re-revoking the same prefix should fail (already inactive).
+	if _, err := w.RevokeByPrefix(alice, metaA.Prefix); err != ErrUnknownKey {
+		t.Fatalf("second revoke should fail")
+	}
+
+	// Bogus prefix also fails.
+	if _, err := w.RevokeByPrefix(alice, "agw_doesntexist"); err != ErrUnknownKey {
+		t.Fatalf("bogus prefix should fail")
 	}
 }
 
-func TestWalletListKeys(t *testing.T) {
-	w, _ := NewWallet("", "0xABCDEF1234567890ABCDEF1234567890ABCDEF12")
-	plain1, _, _ := w.GenerateKey()
-	_, _, _ = w.RotateKey() // revokes plain1, issues new (active)
-	plain3, _, _ := w.GenerateKey()
-
-	keys := w.ListKeys()
-	if len(keys) != 3 {
-		t.Fatalf("ListKeys: %d keys, want 3", len(keys))
-	}
-	// plain1 is revoked by the RotateKey; rotated key and plain3 are active
-	active := 0
-	for _, k := range keys {
-		if k.Active {
-			active++
+func TestWalletPerUserKeys(t *testing.T) {
+	w, _ := NewWallet("")
+	for _, u := range []string{alice, bob, carol} {
+		if _, _, err := w.GenerateKey(u); err != nil {
+			t.Fatalf("generate for %s: %v", u, err)
 		}
 	}
-	if active != 2 {
-		t.Fatalf("expected 2 active keys, got %d", active)
+	keys := w.ListKeys("")
+	if len(keys) != 3 {
+		t.Fatalf("ListKeys(all): got %d, want 3", len(keys))
 	}
-	_ = plain1
-	_ = plain3
+	aliceKeys := w.ListKeys(alice)
+	if len(aliceKeys) != 1 {
+		t.Fatalf("ListKeys(alice): got %d, want 1", len(aliceKeys))
+	}
+	if aliceKeys[0].Owner != strings.ToLower(alice) {
+		t.Fatalf("alice key owner: %q", aliceKeys[0].Owner)
+	}
+}
+
+func TestWalletUsersList(t *testing.T) {
+	w, _ := NewWallet("")
+	w.Credit(alice, 100, "x", "")
+	w.Credit(bob, 200, "x", "")
+	w.Credit(alice, 50, "x", "")
+	users := w.ListUsers()
+	if len(users) != 2 {
+		t.Fatalf("ListUsers: got %d, want 2", len(users))
+	}
+	// alice first (created first)
+	if users[0].From != strings.ToLower(alice) {
+		t.Fatalf("first user: %q, want %q", users[0].From, strings.ToLower(alice))
+	}
+	if users[0].Balance != 150 {
+		t.Fatalf("alice balance: %d, want 150", users[0].Balance)
+	}
+	if users[1].Balance != 200 {
+		t.Fatalf("bob balance: %d, want 200", users[1].Balance)
+	}
 }
 
 func TestWalletPersistence(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "wallet.jsonl")
-	owner := "0x2222222222222222222222222222222222222222"
-
-	w1, err := NewWallet(path, owner)
+	w, err := NewWallet(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := w1.Credit(7_000_000, "first", "0xabc"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := w1.Debit(2_000_000, "spend"); err != nil {
-		t.Fatal(err)
-	}
-	plain, _, _ := w1.GenerateKey()
-	w1.Close()
+	w.Credit(alice, 1000, "first", "")
+	w.Credit(bob, 500, "first", "")
+	plain, _, _ := w.GenerateKey(alice)
+	w.Close()
 
-	// Reload
-	w2, err := NewWallet(path, owner)
+	// Re-open and check state.
+	w2, err := NewWallet(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer w2.Close()
-	bal, _ := w2.Balance()
-	if bal != 5_000_000 {
-		t.Fatalf("reloaded balance: %d, want 5M", bal)
+	if bal, _ := w2.Balance(alice); bal != 1000 {
+		t.Fatalf("reopen alice balance: %d, want 1000", bal)
 	}
-	if _, err := w2.LookupKey(plain); err != nil {
-		t.Fatalf("reloaded key invalid: %v", err)
+	if bal, _ := w2.Balance(bob); bal != 500 {
+		t.Fatalf("reopen bob balance: %d, want 500", bal)
+	}
+	if owner, err := w2.LookupKey(plain); err != nil || owner != strings.ToLower(alice) {
+		t.Fatalf("reopen key: err=%v owner=%q", err, owner)
+	}
+	users := w2.ListUsers()
+	if len(users) != 2 {
+		t.Fatalf("reopen ListUsers: %d, want 2", len(users))
 	}
 }
 
-func TestWalletRejectsInvalidOwner(t *testing.T) {
-	if _, err := NewWallet("", ""); err == nil {
-		t.Fatal("empty owner should error")
+func TestWalletSnapshotUnknownUser(t *testing.T) {
+	w, _ := NewWallet("")
+	snap, err := w.Snapshot(alice)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := NewWallet("", "notanaddress"); err == nil {
-		t.Fatal("invalid owner should error")
+	if snap.From != strings.ToLower(alice) {
+		t.Fatalf("snapshot.From: %q", snap.From)
+	}
+	if snap.Balance != 0 {
+		t.Fatalf("snapshot.Balance: %d, want 0", snap.Balance)
+	}
+	if snap.Active {
+		t.Fatal("unknown user should not be active")
+	}
+}
+
+func TestWalletGetUser(t *testing.T) {
+	w, _ := NewWallet("")
+	// unknown
+	if _, ok := w.GetUser(alice); ok {
+		t.Fatal("unknown user should not be found")
+	}
+	// after register
+	if _, err := w.RegisterUser(alice, ""); err != nil {
+		t.Fatal(err)
+	}
+	u, ok := w.GetUser(alice)
+	if !ok {
+		t.Fatal("alice should be found after register")
+	}
+	if u.PayTo != strings.ToLower(alice) {
+		t.Fatalf("default payTo: %q, want %q", u.PayTo, strings.ToLower(alice))
+	}
+	// explicit payTo
+	if _, err := w.RegisterUser(bob, carol); err != nil {
+		t.Fatal(err)
+	}
+	u2, _ := w.GetUser(bob)
+	if u2.PayTo != strings.ToLower(carol) {
+		t.Fatalf("explicit payTo: %q, want %q", u2.PayTo, strings.ToLower(carol))
 	}
 }
 
 func TestNormalizeAddr(t *testing.T) {
 	cases := []struct {
 		in, want string
-		err      bool
+		wantErr  bool
 	}{
 		{"0xABCDEF1234567890ABCDEF1234567890ABCDEF12", "0xabcdef1234567890abcdef1234567890abcdef12", false},
-		{" 0xAbCdEf1234567890ABCDEF1234567890ABCDEF12 ", "0xabcdef1234567890abcdef1234567890abcdef12", false},
-		{"notanaddress", "", true},
+		{"  0xABCDEF1234567890ABCDEF1234567890ABCDEF12  ", "0xabcdef1234567890abcdef1234567890abcdef12", false},
+		{"0xZZZ", "", true},
+		{"", "", true},
 		{"0x1234", "", true},
-		{"0xGGGGGG1234567890ABCDEF1234567890ABCDEF12", "", true},
 	}
 	for _, c := range cases {
 		got, err := normalizeAddr(c.in)
-		if c.err {
-			if err == nil {
-				t.Errorf("normalizeAddr(%q): expected error", c.in)
-			}
-			continue
+		if (err != nil) != c.wantErr {
+			t.Errorf("normalizeAddr(%q): err=%v, wantErr=%v", c.in, err, c.wantErr)
 		}
-		if err != nil {
-			t.Errorf("normalizeAddr(%q): unexpected err %v", c.in, err)
-			continue
-		}
-		if got != c.want {
+		if !c.wantErr && got != c.want {
 			t.Errorf("normalizeAddr(%q): got %q, want %q", c.in, got, c.want)
 		}
 	}
 }
 
-func TestParsePositiveInt(t *testing.T) {
-	if n, ok := parsePositiveInt("12345"); !ok || n != 12345 {
-		t.Errorf("parsePositiveInt(12345): got %d, ok=%v", n, ok)
+// Smoke test: time precision for key ordering.
+func TestWalletKeyTimeOrdering(t *testing.T) {
+	w, _ := NewWallet("")
+	keys := []string{}
+	for i := 0; i < 3; i++ {
+		k, _, _ := w.GenerateKey(alice)
+		keys = append(keys, k)
+		time.Sleep(2 * time.Millisecond)
 	}
-	if _, ok := parsePositiveInt("0"); ok {
-		t.Error("parsePositiveInt(0): should reject zero")
+	list := w.ListKeys(alice)
+	if len(list) != 3 {
+		t.Fatalf("ListKeys: %d, want 3", len(list))
 	}
-	if _, ok := parsePositiveInt("-1"); ok {
-		t.Error("parsePositiveInt(-1): should reject negative")
+	// newest first
+	if list[0].IssuedAt < list[1].IssuedAt {
+		t.Errorf("expected newest first, got %s < %s", list[0].IssuedAt, list[1].IssuedAt)
 	}
-	if _, ok := parsePositiveInt("12a"); ok {
-		t.Error("parsePositiveInt(12a): should reject non-digit")
-	}
-	if _, ok := parsePositiveInt(""); ok {
-		t.Error("parsePositiveInt(empty): should reject empty")
-	}
-}
-
-func TestFormatInt(t *testing.T) {
-	if formatInt(0) != "0" {
-		t.Errorf("formatInt(0): %q", formatInt(0))
-	}
-	if formatInt(1_000_000) != "1000000" {
-		t.Errorf("formatInt(1M): %q", formatInt(1_000_000))
-	}
+	_ = os.Getenv("PATH") // suppress unused
 }

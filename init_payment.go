@@ -1,5 +1,13 @@
-// init_payment.go — wires the wallet + USDC config into the proxy
-// at startup. Called from RunWithOptions when --pay-to is set.
+// init_payment.go — wire up the multi-tenant payment system.
+//
+// Multi-tenant design (v3):
+//   - There is NO single owner / pay-to address. Users self-register
+//     on their first topup by signing an EIP-3009 transfer.
+//   - Each user chooses their own payTo (defaults to their from).
+//   - The server key (if configured) is a HOT wallet used to
+//     broadcast EIP-3009 transactions as the spender, with gas paid
+//     by the server. The server key's address is NOT a "user" —
+//     it doesn't appear in wallet.jsonl.
 package agw
 
 import (
@@ -14,8 +22,6 @@ import (
 
 func initPayment(proxy *Proxy, opts *Options, logger *slog.Logger) error {
 	// Defaults for Fuji testnet (only apply if no flag / env override).
-	// env-var application happens in run.go's paymentEnv, before we
-	// get here.
 	if opts.USDCAddress == "" {
 		opts.USDCAddress = DefaultFujiUSDC
 	}
@@ -26,18 +32,13 @@ func initPayment(proxy *Proxy, opts *Options, logger *slog.Logger) error {
 		opts.USDCChainID = DefaultFujiChainID
 	}
 
-	// Owner = --pay-to (single-user mode)
-	owner, err := normalizeAddr(opts.PayTo)
-	if err != nil {
-		return fmt.Errorf("init payment: invalid --pay-to: %w", err)
-	}
-
 	// Wallet: persistence under data-dir if available, else in-memory.
+	// No owner addr in construction — users self-register.
 	var walletPath string
 	if opts.DataDir != "" {
 		walletPath = filepath.Join(opts.DataDir, "wallet.jsonl")
 	}
-	wallet, err := NewWallet(walletPath, owner)
+	wallet, err := NewWallet(walletPath)
 	if err != nil {
 		return fmt.Errorf("init wallet: %w", err)
 	}
@@ -46,15 +47,15 @@ func initPayment(proxy *Proxy, opts *Options, logger *slog.Logger) error {
 	if walletPath != "" {
 		mode = "persistent"
 	}
-	bal, _ := wallet.Balance()
 	logger.Info("payment wallet initialized",
-		"owner", owner,
 		"path", walletPath,
 		"mode", mode,
-		"balance", bal,
+		"users", len(wallet.ListUsers()),
 	)
 
-	// Server key (optional — empty = offline mode, accept signatures without settlement)
+	// Server key (optional — empty = offline mode, accept signatures
+	// without settlement). This is the gas-paying hot wallet, not a
+	// "user" — server key addresses are NOT auto-registered.
 	var serverKey *ecdsa.PrivateKey
 	if opts.ServerKeyPath != "" {
 		serverKey, err = loadServerKey(opts.ServerKeyPath)
@@ -71,12 +72,12 @@ func initPayment(proxy *Proxy, opts *Options, logger *slog.Logger) error {
 		return fmt.Errorf("init usdc: %w", err)
 	}
 	proxy.USDC = usdc
-	proxy.PayTo = owner
+	// proxy.PayTo is gone — USDC has no fixed destination; each user
+	// supplies their own payTo via EIP-3009 `to` field.
 
-	logger.Info("payments enabled (single-user mode)",
+	logger.Info("payments enabled (multi-tenant open registration)",
 		"network", usdc.CAIP2(),
 		"asset", usdc.Address.Hex(),
-		"payTo", owner,
 		"onChainSettlement", serverKey != nil,
 	)
 	return nil

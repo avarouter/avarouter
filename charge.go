@@ -3,13 +3,10 @@
 // After the upstream response is fully streamed (or aborted), this
 // module reads the captured usage from the tracked session, computes
 // a USD cost via AGW's existing pricingCost helper, converts to
-// micro-USDC (6 decimals), and debits the owner's balance. If usage
-// is unavailable (e.g. the upstream didn't return one), a small
-// flat minimum is charged so the hot path can never be free.
-//
-// This file owns the "dollars → micro-units" conversion; the pricing
-// table is configured in the standard AGW pricing block and read
-// directly from the Proxy.
+// micro-USDC (6 decimals), and debits the **user that owns the API
+// key** for this session. If usage is unavailable (e.g. the upstream
+// didn't return one), a small flat minimum is charged so the hot
+// path can never be free.
 package agw
 
 import (
@@ -18,16 +15,16 @@ import (
 )
 
 // minChargeMicro is the per-call minimum charged when the upstream
-// didn't return a usable usage object. Keeps the gateway from being
-// a free-for-all against misconfigured upstreams.
+// didn't return a usable usage object.
 const minChargeMicro int64 = 100 // 0.0001 USDC
 
-// chargeFromSession debits the owner's wallet for one proxied
-// request, using the usage captured by the session's usageScanner.
-// Returns the cost in micro-USDC that was debited, or an error.
+// chargeFromSession debits the user that owns the API key for one
+// proxied request, using the usage captured by the session's
+// usageScanner. Returns the cost in micro-USDC that was debited, or
+// an error.
 //
-// The cost is also written to the session's request record (via
-// sessionHub.updateRequest) so the journal shows it.
+// The cost + user are also written to the session's request record
+// (via sessionHub.updateRequest) so the journal shows who paid.
 func (p *Proxy) chargeFromSession(s *trackedSession) (int64, error) {
 	if p == nil || p.Wallet == nil {
 		return 0, errors.New("payments not enabled")
@@ -36,17 +33,23 @@ func (p *Proxy) chargeFromSession(s *trackedSession) (int64, error) {
 		return 0, nil
 	}
 
-	// Read what usageScanner captured while streaming the response.
-	usage := s.usage.tally()
-
-	// Snapshot the model name from the latest request so we can both
-	// price and annotate the journal.
-	var modelName string
+	// Find the user (from API key) and model name from the session.
+	var userAddr, modelName string
 	s.hub.mu.Lock()
 	if rec, ok := s.hub.records[s.sessionID]; ok && rec != nil && len(rec.Requests) > 0 {
-		modelName = rec.Requests[len(rec.Requests)-1].Model
+		req := rec.Requests[len(rec.Requests)-1]
+		userAddr = req.UserAddr
+		modelName = req.Model
 	}
 	s.hub.mu.Unlock()
+	if userAddr == "" {
+		// No user on the session — cannot charge. Log and skip.
+		p.Logger.Warn("skipping charge: no user on session", "session", s.sessionID)
+		return 0, nil
+	}
+
+	// Read what usageScanner captured while streaming the response.
+	usage := s.usage.tally()
 
 	// 1) Pricing-based cost
 	var usdCost float64
@@ -65,8 +68,8 @@ func (p *Proxy) chargeFromSession(s *trackedSession) (int64, error) {
 		micro = minChargeMicro
 	}
 
-	// 4) Debit
-	if _, err := p.Wallet.Debit(micro, "usage: "+modelName); err != nil {
+	// 4) Debit the user (not a global "owner")
+	if _, err := p.Wallet.Debit(userAddr, micro, "usage: "+modelName); err != nil {
 		return 0, err
 	}
 
@@ -79,6 +82,7 @@ func (p *Proxy) chargeFromSession(s *trackedSession) (int64, error) {
 	}
 
 	p.Logger.Info("charged",
+		"user", userAddr,
 		"model", modelName,
 		"tokens_in", usage.InputTokens,
 		"tokens_out", usage.OutputTokens,

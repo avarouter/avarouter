@@ -69,6 +69,10 @@ type sessionRequest struct {
 	// APIKeyPrefix is the 8-char prefix of the plaintext key, kept
 	// for human identification in the stats output.
 	APIKeyPrefix       string
+	// UserAddr is the `from` address of the user who owns the API key
+	// used to authorize this request. Empty for management calls. The
+	// charge hook debits this user's balance (not a global "owner").
+	UserAddr           string
 }
 
 type sessionEvent struct {
@@ -141,16 +145,18 @@ func (t *trackedSession) isProxied() bool {
 	return t != nil && t.proxied
 }
 
-// setKey identifies the API key that authorized this session. The
-// hash is used to roll up per-key stats; the prefix is for human
-// identification in the UI.
-func (t *trackedSession) setKey(hash, prefix string) {
+// setKey identifies the API key (and its owning user) that authorized
+// this session. The hash is used to roll up per-key stats; the
+// prefix is for human identification; the user addr is what charge
+// debits.
+func (t *trackedSession) setKey(hash, prefix, userAddr string) {
 	if t == nil || t.hub == nil {
 		return
 	}
 	t.hub.updateRequest(t, func(req *sessionRequest) {
 		req.APIKeyHash = hash
 		req.APIKeyPrefix = prefix
+		req.UserAddr = userAddr
 	})
 }
 

@@ -52,9 +52,9 @@ func newRootCommand(opts *agw.Options, defaultAddr, invalidPort string, logger *
 	flags.StringVar(&opts.DataDir, "data-dir", "", "persist sessions, payloads and logs to this directory")
 	flags.StringVar(&opts.AdminUser, "admin-user", "", "Basic Auth username for the management UI (env: AGW_ADMIN_USER; must be paired with --admin-password)")
 	flags.StringVar(&opts.AdminPassword, "admin-password", "", "Basic Auth password for the management UI (env: AGW_ADMIN_PASSWORD)")
-	// Prepaid payment flags (x402 / Avalanche USDC). When --pay-to is
-	// omitted the gateway runs in legacy mode and never charges callers.
-	flags.StringVar(&opts.PayTo, "pay-to", "", "enable payments: server's payout address (EIP-3009 transferWithAuthorization destination). Empty disables.")
+	// Prepaid payment flags (x402 / Avalanche USDC). Multi-tenant:
+	// there is no single owner; users self-register on first topup.
+	// If --usdc-rpc / --usdc-address are set, payments are enabled.
 	flags.StringVar(&opts.USDCAddress, "usdc-address", "", "USDC contract address (default: Fuji testnet 0x5425890298aed601595a70AB815c96711a31Bc65)")
 	flags.StringVar(&opts.USDCRPCURL, "usdc-rpc", "", "EVM RPC URL for settlement (default: https://api.avax-test.network/ext/bc/C/rpc)")
 	flags.Int64Var(&opts.USDCChainID, "usdc-chain-id", 0, "EVM chain id (default: 43113 Avalanche Fuji testnet)")

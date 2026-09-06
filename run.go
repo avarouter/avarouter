@@ -40,11 +40,13 @@ type Options struct {
 	// in a temporary directory.
 	DataDir string
 
-	// Prepaid payment options (x402 V2 / Avalanche USDC). When PayTo is
-	// empty, the gateway runs in legacy mode and never charges callers.
-	// When PayTo is set, /v1/topup accepts EIP-3009 signed deposits and
-	// every other request requires X-Payer + positive balance.
-	PayTo         string // server's payout address (must match USDC transfers)
+	// Prepaid payment options (x402 V2 / Avalanche USDC).
+	//
+	// Multi-tenant design: there is no single --pay-to / owner
+	// address. USDCAddress + USDCRPCURL + USDCChainID describe the
+	// network + asset. ServerKeyPath is the gas-paying hot wallet
+	// for on-chain settlement (empty = offline mode). Users
+	// self-register on first topup with their own from/payTo.
 	USDCAddress   string // defaults to Fuji USDC if empty
 	USDCRPCURL    string // defaults to Fuji public RPC if empty
 	USDCChainID   int64  // defaults to 43113 (Fuji) if 0
@@ -135,19 +137,18 @@ func RunWithOptions(opts Options) error {
 		sessions.setPricing(settings.Pricing)
 	}
 
-	// Prepaid payment wiring (x402). Activated when PayTo is set.
-	//
-	// Apply env-var fallbacks BEFORE the gate so AGW_PAY_TO etc. work
-	// even when the user didn't pass --pay-to on the CLI.
+	// Prepaid payment wiring (x402). Multi-tenant: no --pay-to required.
+	// Env vars can fill the USDC config; if --usdc-rpc / --usdc-address
+	// are present, payments are enabled. Otherwise legacy mode.
 	if envApplied := paymentEnv(&opts); len(envApplied) > 0 {
 		logger.Info("payment env-var fallbacks applied", "vars", envApplied)
 	}
-	if opts.PayTo != "" {
+	if opts.USDCRPCURL != "" || opts.USDCAddress != "" {
 		if err := initPayment(proxy, &opts, logger); err != nil {
 			return err
 		}
 	} else {
-		logger.Info("payments disabled (no --pay-to set); gateway runs in legacy mode")
+		logger.Info("payments disabled (no --usdc-rpc / AGW_USDC_RPC set); gateway runs in legacy mode")
 	}
 
 	if adminUser != "" {
@@ -231,7 +232,6 @@ func Run(args []string) error {
 	flags.StringVar(&opts.DataDir, "data-dir", "", "persist sessions, payloads and logs to this directory")
 	flags.StringVar(&opts.AdminUser, "admin-user", "", "Basic Auth username for the management UI (env: AGW_ADMIN_USER; must be paired with --admin-password)")
 	flags.StringVar(&opts.AdminPassword, "admin-password", "", "Basic Auth password for the management UI (env: AGW_ADMIN_PASSWORD)")
-	flags.StringVar(&opts.PayTo, "pay-to", "", "enable payments: server's payout address (EIP-3009 transferWithAuthorization destination). Empty disables.")
 	flags.StringVar(&opts.USDCAddress, "usdc-address", "", "USDC contract address (default: Fuji testnet)")
 	flags.StringVar(&opts.USDCRPCURL, "usdc-rpc", "", "EVM RPC URL for settlement (default: Fuji public RPC)")
 	flags.Int64Var(&opts.USDCChainID, "usdc-chain-id", 0, "EVM chain id (default: 43113)")
@@ -268,19 +268,13 @@ func managementCredentials(opts Options) (user, password string, err error) {
 	return user, password, nil
 }
 
-// paymentEnv applies AGW_PAY_TO / AGW_USDC_ADDRESS / AGW_USDC_RPC /
+// paymentEnv applies AGW_USDC_ADDRESS / AGW_USDC_RPC /
 // AGW_USDC_CHAIN_ID / AGW_USDC_SERVER_KEY / AGW_USDC_SERVER_KEY_PATH
 // environment variables to opts. CLI flags take precedence; the
 // function only fills empty fields. Returns the list of fields
 // that were populated, for logging.
 func paymentEnv(opts *Options) []string {
 	applied := []string{}
-	if opts.PayTo == "" {
-		if v := os.Getenv("AGW_PAY_TO"); v != "" {
-			opts.PayTo = v
-			applied = append(applied, "AGW_PAY_TO")
-		}
-	}
 	if opts.USDCAddress == "" {
 		if v := os.Getenv("AGW_USDC_ADDRESS"); v != "" {
 			opts.USDCAddress = v
@@ -303,8 +297,6 @@ func paymentEnv(opts *Options) []string {
 	}
 	if opts.ServerKeyPath == "" {
 		if v := os.Getenv("AGW_USDC_SERVER_KEY"); v != "" {
-			// Inline hex (0x... or 64 raw hex chars) → use as-is,
-			// loadServerKey will decode it. Otherwise treat as path.
 			opts.ServerKeyPath = v
 			applied = append(applied, "AGW_USDC_SERVER_KEY")
 		} else if v := os.Getenv("AGW_USDC_SERVER_KEY_PATH"); v != "" {

@@ -168,6 +168,10 @@ type statsEntry struct {
 	// usage statistics.
 	apiKeyHash   string
 	apiKeyPrefix string
+	// userAddr is the `from` address of the user that owns the
+	// API key used for this request (empty for management calls).
+	// Used to roll up per-user usage statistics.
+	userAddr     string
 	isError      bool
 }
 
@@ -713,6 +717,7 @@ func updateStatsEntry(entry *statsEntry, request *sessionRequest) {
 	}
 	entry.apiKeyHash = request.APIKeyHash
 	entry.apiKeyPrefix = request.APIKeyPrefix
+	entry.userAddr = request.UserAddr
 	entry.isError = request.Status >= 400 || errorState(request.State)
 }
 
