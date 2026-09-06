@@ -1,37 +1,16 @@
 // topup.go — POST /v1/topup is the single x402-protected endpoint in
 // this gateway. It accepts an EIP-3009 signed authorization, verifies
 // the signature, optionally settles on-chain, and credits the
-// internal wallet balance.
+// owner's internal balance.
 //
-// Wire format (x402 V2 compatible):
-//   Request 1 (no payment yet):
-//     POST /v1/topup
-//     Content-Type: application/json
-//     X-Payer: 0xABC...         (the address to credit)
-//     {"amount": "1000000"}     (USDC micro-units, e.g. 1 USDC = 1_000_000)
-//
-//   Response 1 (402 Payment Required):
-//     HTTP/1.1 402 Payment Required
-//     Content-Type: application/json
-//     {
-//       "x402Version": 2,
-//       "accepts": [{...PaymentRequirements with nonce + payTo...}],
-//       "error": "X-PAYMENT-REQUIRED"
-//     }
-//
-//   Request 2 (with signed authorization):
-//     POST /v1/topup
-//     X-Payer: 0xABC...
-//     {"amount": "1000000", "payment": {"from":"0x..", "to":"0x..", "value":"...", ...}}
-//
-//   Response 2 (200 OK, balance credited):
-//     {"ok": true, "balance": "1000000", "txHash": "0x..."}
+// In single-user mode, the X-Payer must match the locked owner
+// address (set via --pay-to). This prevents anyone from topping up
+// someone else's balance.
 package agw
 
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -43,20 +22,18 @@ import (
 // Amount is the requested credit in USDC micro-units. Payment (optional
 // in the first round-trip) is the EIP-3009 signed authorization.
 type TopupRequest struct {
-	Amount  string      `json:"amount"`
+	Amount  string       `json:"amount"`
 	Payment *PaymentAuth `json:"payment,omitempty"`
 }
 
 // TopupResponse is the success body after a topup completes.
 type TopupResponse struct {
 	OK      bool   `json:"ok"`
-	Balance string `json:"balance"`     // new balance, micro-units
+	Balance string `json:"balance"`
 	TxHash  string `json:"txHash,omitempty"`
 	Note    string `json:"note,omitempty"`
 }
 
-// serveTopup is the HTTP handler. It is NOT a management route, so it
-// is gated by X-Payer and runs through the wallet, not basicAuth.
 func (p *Proxy) serveTopup(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -74,6 +51,11 @@ func (p *Proxy) serveTopup(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := normalizeAddr(payer); err != nil {
 		http.Error(w, "invalid X-Payer: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	// Single-user mode: only the locked owner can topup.
+	if payer != p.Wallet.Addr() {
+		http.Error(w, "X-Payer does not match this server's owner", http.StatusForbidden)
 		return
 	}
 
@@ -170,7 +152,7 @@ func (p *Proxy) serveTopup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Credit wallet
-	newBal, err := p.Wallet.Credit(payer, amount, "x402 topup", txHash)
+	newBal, err := p.Wallet.Credit(amount, "x402 topup", txHash)
 	if err != nil {
 		p.Logger.Error("wallet credit failed", "payer", payer, "error", err.Error())
 		http.Error(w, "credit failed: "+err.Error(), http.StatusInternalServerError)
@@ -187,7 +169,6 @@ func (p *Proxy) serveTopup(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// logTopupChallenge records the 402 emit for /logs.
 func (p *Proxy) logTopupChallenge(payer string, amount int64, nonce [32]byte) {
 	p.Logger.Info("topup challenge issued",
 		"payer", payer,
@@ -243,6 +224,3 @@ func encodeNonce(b []byte) string {
 	}
 	return string(out)
 }
-
-// errMissingPayer is exported for tests.
-var errMissingPayer = errors.New("X-Payer header required")

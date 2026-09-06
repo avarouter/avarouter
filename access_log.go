@@ -89,6 +89,14 @@ func requestLogger(logger Logger, next http.Handler) http.Handler {
 				}
 			}
 			session.complete(status, writer.bytes, ctxErr)
+			// Usage-based charge (single-user demo). Only on successful
+			// 2xx AND only if the request was actually proxied to an
+			// upstream (not /v1/topup, /v1/keys, etc).
+			if session.isProxied() && proxy != nil && proxy.Wallet != nil && status >= 200 && status < 300 {
+				if _, err := proxy.chargeFromSession(session); err != nil {
+					proxy.Logger.Error("charge failed", "error", err.Error())
+				}
+			}
 		}
 	})
 }

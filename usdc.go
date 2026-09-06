@@ -199,42 +199,48 @@ func (u *USDC) VerifyPaymentAuth(expectedPayer string, auth PaymentAuth) (string
 		return "", fmt.Errorf("auth.s invalid")
 	}
 
-	// EIP-712 domain separator
+	// EIP-712 domain separator.
+	// Per the EIP-712 spec: atomic types (address, uint256, bytes32) are
+	// padded to 32 bytes and inlined directly; only bytes/string are
+	// hashed. Don't hash address/uint256.
 	domainType := []byte("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)")
-	domainHash := crypto.Keccak256(domainType)
+	domainTypeHash := crypto.Keccak256(domainType)
 
 	nameHash := crypto.Keccak256([]byte(USDCDomainName))
 	versionHash := crypto.Keccak256([]byte(USDCDomainVersion))
-	chainIDHash := crypto.Keccak256(leftPad32(u.ChainID.Bytes()))
-	addrHash := crypto.Keccak256(leftPad32(u.Address.Bytes()))
+	chainIDBytes := leftPad32(u.ChainID.Bytes())
+	addrBytes := leftPad32(u.Address.Bytes())
 
 	domainSeparator := crypto.Keccak256(
-		domainHash,
+		domainTypeHash,
 		nameHash,
 		versionHash,
-		chainIDHash,
-		addrHash,
+		chainIDBytes,
+		addrBytes,
 	)
 
-	// EIP-712 message hash for TransferWithAuthorization
+	// EIP-712 struct hash for TransferWithAuthorization. Same encoding
+	// rule: atomic types inlined as 32 bytes, only bytes32 (the nonce)
+	// is "as-is" (already 32 bytes).
 	msgType := []byte("TransferWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)")
 	typeHash := crypto.Keccak256(msgType)
 
-	fromHash := crypto.Keccak256(leftPad32(common.HexToAddress(from).Bytes()))
-	toHash := crypto.Keccak256(leftPad32(common.HexToAddress(auth.To).Bytes()))
-	valueHash := crypto.Keccak256(leftPad32(value.Bytes()))
-	validAfterHash := crypto.Keccak256(leftPad32(validAfter.Bytes()))
-	validBeforeHash := crypto.Keccak256(leftPad32(validBefore.Bytes()))
-	nonceHash := crypto.Keccak256(nonce)
+	fromBytes := leftPad32(common.HexToAddress(from).Bytes())
+	toBytes := leftPad32(common.HexToAddress(auth.To).Bytes())
+	valueBytes := leftPad32(value.Bytes())
+	validAfterBytes := leftPad32(validAfter.Bytes())
+	validBeforeBytes := leftPad32(validBefore.Bytes())
+	nonceBytes := make([]byte, 32)
+	copy(nonceBytes, nonce)
 
 	structHash := crypto.Keccak256(
 		typeHash,
-		fromHash,
-		toHash,
-		valueHash,
-		validAfterHash,
-		validBeforeHash,
-		nonceHash,
+		fromBytes,
+		toBytes,
+		valueBytes,
+		validAfterBytes,
+		validBeforeBytes,
+		nonceBytes,
 	)
 	// EIP-712 final digest = keccak256(0x19 0x01 || domainSeparator || structHash)
 	msgHash := crypto.Keccak256(

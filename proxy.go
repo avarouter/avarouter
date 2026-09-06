@@ -1172,33 +1172,35 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// x402 topup endpoint — bypasses the payment gate (it IS the
-	// payment). Always returns x402 PaymentRequirements on the first
-	// round-trip, then verifies signature and credits balance on the
-	// second round-trip.
+	// x402 topup endpoint — auth: X-Payer (owner). Bypasses bearer.
 	if r.URL.Path == "/v1/topup" {
 		p.serveTopup(w, r)
 		return
 	}
-	// Public balance query endpoints — bypass the payment gate but
-	// still subject to general rate limiting (P1).
-	if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/payments/balance/") {
+	// API key management — auth: X-Payer (owner). Bypasses bearer.
+	if r.URL.Path == "/v1/keys" {
+		p.serveKeys(w, r)
+		return
+	}
+	if r.URL.Path == "/v1/keys/rotate" {
+		p.serveKeysRotate(w, r)
+		return
+	}
+	// Public balance query — open.
+	if r.URL.Path == "/payments/balance" && r.Method == http.MethodGet {
 		p.servePaymentsBalance(w, r)
 		return
 	}
-	if r.URL.Path == "/payments/balances" && r.Method == http.MethodGet {
-		p.servePaymentsBalances(w, r)
+
+	// Hot path: bearer auth (Authorization: Bearer <key>) + balance check.
+	if !p.bearerAuth(w, r) {
 		return
 	}
 
-	// Prepaid payment gate: require X-Payer and reserve a hold against
-	// the wallet. Refund on failure, settle on success (see defer below).
-	_, holdID, writeError, _ := p.paymentGate(w, r)
-	if writeError {
-		return
-	}
-	if holdID != "" {
-		defer p.settleOrRefund(holdID, w)
+	// Mark the request as "proxied" so access_log's charge hook only
+	// fires for real upstream calls (not for /v1/topup / /v1/keys).
+	if session := trackedSessionFromContext(r.Context()); session != nil {
+		session.markProxied()
 	}
 
 	body, err := io.ReadAll(r.Body)

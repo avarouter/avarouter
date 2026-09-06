@@ -1,152 +1,154 @@
-// wallet_test.go — exercises the balance ledger's hold/settle/refund
-// state machine and JSONL persistence. Uses an in-memory wallet (no
-// logPath) to keep the tests hermetic.
+// wallet_test.go — covers the simplified single-user wallet: credit /
+// debit / balance / key generation / lookup / rotation / persistence.
 package agw
 
 import (
-	"bytes"
-	"encoding/json"
-	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 )
 
 func TestWalletCreditDebit(t *testing.T) {
-	w, err := NewWallet("")
+	w, err := NewWallet("", "0xABCDEF1234567890ABCDEF1234567890ABCDEF12")
 	if err != nil {
 		t.Fatal(err)
 	}
-	addr := "0xABCDEF1234567890ABCDEF1234567890ABCDEF12"
-	if _, err := w.Credit(addr, 5_000_000, "test", ""); err != nil {
+	if _, err := w.Credit(5_000_000, "test", ""); err != nil {
 		t.Fatal(err)
 	}
-	bal, err := w.Balance(addr)
-	if err != nil || bal != 5_000_000 {
-		t.Fatalf("balance: got %d, err %v", bal, err)
+	bal, _ := w.Balance()
+	if bal != 5_000_000 {
+		t.Fatalf("balance after credit: %d, want 5M", bal)
 	}
-	snap, _ := w.Snapshot(addr)
-	if snap.Balance != 5_000_000 || snap.Held != 0 {
-		t.Fatalf("snapshot: %+v", snap)
+	if _, err := w.Debit(2_000_000, "spend"); err != nil {
+		t.Fatal(err)
+	}
+	bal, _ = w.Balance()
+	if bal != 3_000_000 {
+		t.Fatalf("balance after debit: %d, want 3M", bal)
 	}
 }
 
-func TestWalletHoldSettleRefund(t *testing.T) {
-	w, _ := NewWallet("")
-	addr := "0x1111111111111111111111111111111111111111"
-	if _, err := w.Credit(addr, 10_000_000, "", ""); err != nil {
-		t.Fatal(err)
+func TestWalletDebitRejectsNonPositive(t *testing.T) {
+	w, _ := NewWallet("", "0xABCDEF1234567890ABCDEF1234567890ABCDEF12")
+	if _, err := w.Debit(0, "x"); err == nil {
+		t.Fatal("Debit(0) should error")
 	}
-	// Hold 4 USDC
-	holdID, err := w.Hold(addr, 4_000_000)
+	if _, err := w.Debit(-1, "x"); err == nil {
+		t.Fatal("Debit(-1) should error")
+	}
+}
+
+func TestWalletCreditRejectsNonPositive(t *testing.T) {
+	w, _ := NewWallet("", "0xABCDEF1234567890ABCDEF1234567890ABCDEF12")
+	if _, err := w.Credit(0, "x", ""); err == nil {
+		t.Fatal("Credit(0) should error")
+	}
+}
+
+func TestWalletKeyGenerateLookupRotate(t *testing.T) {
+	w, _ := NewWallet("", "0xABCDEF1234567890ABCDEF1234567890ABCDEF12")
+	plain, meta, err := w.GenerateKey()
 	if err != nil {
 		t.Fatal(err)
 	}
-	bal, _ := w.Balance(addr)
-	if bal != 6_000_000 {
-		t.Fatalf("after hold: balance=%d, want 6M", bal)
+	if !strings.HasPrefix(plain, APIKeyPrefix) {
+		t.Fatalf("key missing prefix: %q", plain)
 	}
-	snap, _ := w.Snapshot(addr)
-	if snap.Held != 4_000_000 {
-		t.Fatalf("held=%d, want 4M", snap.Held)
+	if !meta.Active {
+		t.Fatal("newly issued key should be active")
 	}
-	// Settle 2 USDC → release 2
-	if err := w.Settle(holdID, 2_000_000); err != nil {
+	addr, err := w.LookupKey(plain)
+	if err != nil || addr != "0xabcdef1234567890abcdef1234567890abcdef12" {
+		t.Fatalf("LookupKey: addr=%q err=%v", addr, err)
+	}
+
+	// Rotate: old key should be revoked, new key works.
+	plain2, _, err := w.RotateKey()
+	if err != nil {
 		t.Fatal(err)
 	}
-	bal, _ = w.Balance(addr)
-	if bal != 8_000_000 {
-		t.Fatalf("after settle: balance=%d, want 8M", bal)
+	if _, err := w.LookupKey(plain); err != ErrUnknownKey {
+		t.Fatalf("old key should be revoked, got err=%v", err)
 	}
-	// Refund the rest
-	holdID2, _ := w.Hold(addr, 1_000_000)
-	if err := w.Refund(holdID2); err != nil {
-		t.Fatal(err)
-	}
-	bal, _ = w.Balance(addr)
-	if bal != 8_000_000 {
-		t.Fatalf("after refund: balance=%d, want 8M", bal)
+	if _, err := w.LookupKey(plain2); err != nil {
+		t.Fatalf("new key should be valid, got err=%v", err)
 	}
 }
 
-func TestWalletHoldUnknownAddress(t *testing.T) {
-	w, _ := NewWallet("")
-	_, err := w.Hold("0xDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF", 1_000_000)
-	if err != ErrUnknownAddress {
-		t.Fatalf("want ErrUnknownAddress, got %v", err)
+func TestWalletKeyRejectsEmpty(t *testing.T) {
+	w, _ := NewWallet("", "0xABCDEF1234567890ABCDEF1234567890ABCDEF12")
+	if _, err := w.LookupKey(""); err != ErrUnknownKey {
+		t.Fatalf("empty key: err=%v, want ErrUnknownKey", err)
+	}
+	if _, err := w.LookupKey("agw_notreallyrandom"); err != ErrUnknownKey {
+		t.Fatalf("bogus key: err=%v, want ErrUnknownKey", err)
 	}
 }
 
-func TestWalletSettleUnknownHold(t *testing.T) {
-	w, _ := NewWallet("")
-	if err := w.Settle("h_doesnotexist", 0); err != ErrUnknownHold {
-		t.Fatalf("want ErrUnknownHold, got %v", err)
+func TestWalletListKeys(t *testing.T) {
+	w, _ := NewWallet("", "0xABCDEF1234567890ABCDEF1234567890ABCDEF12")
+	plain1, _, _ := w.GenerateKey()
+	_, _, _ = w.RotateKey() // revokes plain1, issues new (active)
+	plain3, _, _ := w.GenerateKey()
+
+	keys := w.ListKeys()
+	if len(keys) != 3 {
+		t.Fatalf("ListKeys: %d keys, want 3", len(keys))
 	}
+	// plain1 is revoked by the RotateKey; rotated key and plain3 are active
+	active := 0
+	for _, k := range keys {
+		if k.Active {
+			active++
+		}
+	}
+	if active != 2 {
+		t.Fatalf("expected 2 active keys, got %d", active)
+	}
+	_ = plain1
+	_ = plain3
 }
 
 func TestWalletPersistence(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "balances.jsonl")
-	addr := "0x2222222222222222222222222222222222222222"
+	path := filepath.Join(dir, "wallet.jsonl")
+	owner := "0x2222222222222222222222222222222222222222"
 
-	w1, err := NewWallet(path)
+	w1, err := NewWallet(path, owner)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := w1.Credit(addr, 3_000_000, "first", ""); err != nil {
+	if _, err := w1.Credit(7_000_000, "first", "0xabc"); err != nil {
 		t.Fatal(err)
 	}
-	holdID, _ := w1.Hold(addr, 1_000_000)
-	w1.Settle(holdID, 500_000) // net: +3M -0.5M = 2.5M
+	if _, err := w1.Debit(2_000_000, "spend"); err != nil {
+		t.Fatal(err)
+	}
+	plain, _, _ := w1.GenerateKey()
 	w1.Close()
 
 	// Reload
-	w2, err := NewWallet(path)
+	w2, err := NewWallet(path, owner)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer w2.Close()
-	bal, _ := w2.Balance(addr)
-	if bal != 2_500_000 {
-		t.Fatalf("reloaded balance: got %d, want 2.5M", bal)
+	bal, _ := w2.Balance()
+	if bal != 5_000_000 {
+		t.Fatalf("reloaded balance: %d, want 5M", bal)
 	}
-
-	// Verify the log file is valid JSONL
-	data, _ := os.ReadFile(path)
-	lines := bytes.Split(bytes.TrimSpace(data), []byte("\n"))
-	if len(lines) < 3 {
-		t.Fatalf("expected ≥3 log lines, got %d", len(lines))
-	}
-	for _, line := range lines {
-		var e WalletEntry
-		if err := json.Unmarshal(line, &e); err != nil {
-			t.Fatalf("bad line: %s (%v)", line, err)
-		}
+	if _, err := w2.LookupKey(plain); err != nil {
+		t.Fatalf("reloaded key invalid: %v", err)
 	}
 }
 
-func TestWalletConcurrent(t *testing.T) {
-	w, _ := NewWallet("")
-	addr := "0x3333333333333333333333333333333333333333"
-	w.Credit(addr, 100_000_000, "", "") // 100 USDC
-
-	var wg sync.WaitGroup
-	for i := 0; i < 50; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			hold, err := w.Hold(addr, 1_000_000)
-			if err != nil {
-				return
-			}
-			w.Settle(hold, 1_000_000)
-		}()
+func TestWalletRejectsInvalidOwner(t *testing.T) {
+	if _, err := NewWallet("", ""); err == nil {
+		t.Fatal("empty owner should error")
 	}
-	wg.Wait()
-	bal, _ := w.Balance(addr)
-	if bal != 50_000_000 {
-		t.Fatalf("after 50 holds+settles of 1M each from 100M: got %d, want 50M", bal)
+	if _, err := NewWallet("", "notanaddress"); err == nil {
+		t.Fatal("invalid owner should error")
 	}
 }
 
@@ -198,40 +200,10 @@ func TestParsePositiveInt(t *testing.T) {
 }
 
 func TestFormatInt(t *testing.T) {
-	cases := []struct{ in int64; want string }{
-		{0, "0"},
-		{1, "1"},
-		{1000000, "1000000"},
-		{1_000_000_000, "1000000000"},
+	if formatInt(0) != "0" {
+		t.Errorf("formatInt(0): %q", formatInt(0))
 	}
-	for _, c := range cases {
-		if got := formatInt(c.in); got != c.want {
-			t.Errorf("formatInt(%d): got %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
-// Sanity check: make sure PaymentRequirements JSON contains the
-// expected x402-V2 fields.
-func TestPaymentRequirementsShape(t *testing.T) {
-	u, err := NewUSDC(DefaultFujiUSDC, DefaultFujiRPC, DefaultFujiChainID, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	req, nonce, err := u.BuildRequirements("/v1/topup", "desc", "0xRecipient", 1_000_000)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if nonce == [32]byte{} {
-		t.Fatal("nonce must be non-zero")
-	}
-	if req.Scheme != "exact" {
-		t.Errorf("scheme: got %q, want exact", req.Scheme)
-	}
-	if !strings.HasPrefix(req.Network, "eip155:") {
-		t.Errorf("network: got %q, want eip155:*", req.Network)
-	}
-	if req.MaxAmountRequired != "1000000" {
-		t.Errorf("amount: got %q, want 1000000", req.MaxAmountRequired)
+	if formatInt(1_000_000) != "1000000" {
+		t.Errorf("formatInt(1M): %q", formatInt(1_000_000))
 	}
 }

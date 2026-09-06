@@ -58,6 +58,10 @@ type sessionRequest struct {
 	TokenCacheExcluded bool
 	TokenTotal         int64
 	HasTokenUsage      bool
+	// Cost debited for this request (micro-USDC). Computed by
+	// chargeFromSession after the response completes.
+	CostMicroUSDC      int64
+	CostUSD            float64
 }
 
 type sessionEvent struct {
@@ -108,6 +112,26 @@ type trackedSession struct {
 	sessionID string
 	sequence  uint64
 	usage     usageScanner
+	// proxied is set to true by Proxy.ServeHTTP when the request is
+	// actually forwarded to an upstream. The access_log hook reads
+	// it to decide whether to run the usage-based charge (skipping
+	// /v1/topup, /v1/keys, and other non-proxied management paths).
+	proxied bool
+}
+
+// markProxied flags the session as having been forwarded to an
+// upstream. Safe to call from any goroutine while the request is
+// in-flight (no synchronization needed because the hook reads it
+// after ServeHTTP returns, which establishes a happens-before).
+func (t *trackedSession) markProxied() {
+	if t != nil {
+		t.proxied = true
+	}
+}
+
+// isProxied reports whether markProxied has been called.
+func (t *trackedSession) isProxied() bool {
+	return t != nil && t.proxied
 }
 
 type sessionCard struct {

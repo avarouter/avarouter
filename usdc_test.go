@@ -28,11 +28,10 @@ func TestVerifyPaymentAuthRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	amount := big.NewInt(1_000_000) // 1 USDC
-	value := amount.String()
+	amount := big.NewInt(1_000_000)
 	now := time.Now().Unix()
-	validAfter := big.NewInt(now - 60).String()
-	validBefore := big.NewInt(now + 300).String()
+	validAfter := big.NewInt(now - 60)
+	validBefore := big.NewInt(now + 300)
 
 	var nonce [32]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
@@ -41,14 +40,18 @@ func TestVerifyPaymentAuthRoundTrip(t *testing.T) {
 
 	// 3) Compute the same EIP-712 digest VerifyPaymentAuth computes
 	domainSeparator := computeDomainSeparatorForTest(t, usdc)
-	msgHash := computeTransferWithAuthDigestForTest(
-		t, domainSeparator,
+	structHash := computeTransferWithAuthStructForTest(t,
 		common.HexToAddress(payer),
 		common.HexToAddress(recipient),
 		amount,
-		big.NewInt(now-60),
-		big.NewInt(now+300),
+		validAfter,
+		validBefore,
 		nonce,
+	)
+	msgHash := crypto.Keccak256(
+		[]byte{0x19, 0x01},
+		domainSeparator,
+		structHash,
 	)
 
 	// 4) Sign the digest with the payer key
@@ -56,23 +59,20 @@ func TestVerifyPaymentAuthRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// go-ethereum's crypto.Sign returns v ∈ {0, 1}; EIP-3009 uses
-	// v ∈ {27, 28}. Add 27 to translate.
 	v := sig[64] + 27
 	r := sig[:32]
-	ss := sig[32:64]
-	t.Logf("sig[64]=%d, v after +27=%d, msgHash=%x", sig[64], v, msgHash)
+	s := sig[32:64]
 
 	auth := PaymentAuth{
 		From:        payer,
 		To:          recipient,
-		Value:       value,
-		ValidAfter:  validAfter,
-		ValidBefore: validBefore,
+		Value:       amount.String(),
+		ValidAfter:  validAfter.String(),
+		ValidBefore: validBefore.String(),
 		Nonce:       "0x" + common.Bytes2Hex(nonce[:]),
 		V:           v,
 		R:           "0x" + common.Bytes2Hex(r),
-		S:           "0x" + common.Bytes2Hex(ss),
+		S:           "0x" + common.Bytes2Hex(s),
 	}
 
 	// 5) Verify
@@ -80,7 +80,6 @@ func TestVerifyPaymentAuthRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("VerifyPaymentAuth: %v", err)
 	}
-	// got is lowercase; normalize payer for comparison.
 	if got != strings.ToLower(payer) {
 		t.Fatalf("recovered: got %s, want %s", got, strings.ToLower(payer))
 	}
@@ -88,10 +87,8 @@ func TestVerifyPaymentAuthRoundTrip(t *testing.T) {
 
 func TestVerifyPaymentAuthRejectsBadPayer(t *testing.T) {
 	usdc, _ := NewUSDC(DefaultFujiUSDC, DefaultFujiRPC, DefaultFujiChainID, nil)
-	// attacker claims from=0xATTACKER but signs as 0xVICTIM
-	victim := "0x" + randomHex(t, 20)
 	auth := PaymentAuth{
-		From:        "0x" + randomHex(t, 20), // different
+		From:        "0x" + randomHex(t, 20),
 		To:          "0x" + randomHex(t, 20),
 		Value:       "1000000",
 		ValidAfter:  "0",
@@ -99,7 +96,7 @@ func TestVerifyPaymentAuthRejectsBadPayer(t *testing.T) {
 		Nonce:       "0x" + randomHex(t, 32),
 		V:           27, R: "0x" + randomHex(t, 32), S: "0x" + randomHex(t, 32),
 	}
-	if _, err := usdc.VerifyPaymentAuth(victim, auth); err == nil {
+	if _, err := usdc.VerifyPaymentAuth("0x"+randomHex(t, 20), auth); err == nil {
 		t.Fatal("expected error for mismatched from")
 	}
 }
@@ -111,7 +108,7 @@ func TestVerifyPaymentAuthRejectsExpired(t *testing.T) {
 		To:          "0x" + randomHex(t, 20),
 		Value:       "1000000",
 		ValidAfter:  "0",
-		ValidBefore: "1", // expired long ago
+		ValidBefore: "1",
 		Nonce:       "0x" + randomHex(t, 32),
 		V:           27, R: "0x" + randomHex(t, 32), S: "0x" + randomHex(t, 32),
 	}
@@ -120,23 +117,46 @@ func TestVerifyPaymentAuthRejectsExpired(t *testing.T) {
 	}
 }
 
+func TestPaymentRequirementsShape(t *testing.T) {
+	u, err := NewUSDC(DefaultFujiUSDC, DefaultFujiRPC, DefaultFujiChainID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, nonce, err := u.BuildRequirements("/v1/topup", "desc", "0xRecipient", 1_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nonce == [32]byte{} {
+		t.Fatal("nonce must be non-zero")
+	}
+	if req.Scheme != "exact" {
+		t.Errorf("scheme: got %q, want exact", req.Scheme)
+	}
+	if !strings.HasPrefix(req.Network, "eip155:") {
+		t.Errorf("network: got %q, want eip155:*", req.Network)
+	}
+	if req.MaxAmountRequired != "1000000" {
+		t.Errorf("amount: got %q, want 1000000", req.MaxAmountRequired)
+	}
+}
+
 // --- helpers (must match the construction inside usdc.go) ---
 
 func computeDomainSeparatorForTest(t *testing.T, u *USDC) []byte {
 	t.Helper()
 	domainType := []byte("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)")
-	domainHash := crypto.Keccak256(domainType)
+	domainTypeHash := crypto.Keccak256(domainType)
 	nameHash := crypto.Keccak256([]byte(USDCDomainName))
 	versionHash := crypto.Keccak256([]byte(USDCDomainVersion))
-	chainIDHash := crypto.Keccak256(leftPad32(u.ChainID.Bytes()))
-	addrHash := crypto.Keccak256(leftPad32(u.Address.Bytes()))
+	chainIDBytes := leftPad32(u.ChainID.Bytes())
+	addrBytes := leftPad32(u.Address.Bytes())
 	return crypto.Keccak256(
-		domainHash, nameHash, versionHash, chainIDHash, addrHash,
+		domainTypeHash, nameHash, versionHash, chainIDBytes, addrBytes,
 	)
 }
 
-func computeTransferWithAuthDigestForTest(
-	t *testing.T, domainSep []byte,
+func computeTransferWithAuthStructForTest(
+	t *testing.T,
 	from, to common.Address,
 	value, validAfter, validBefore *big.Int,
 	nonce [32]byte,
@@ -144,22 +164,16 @@ func computeTransferWithAuthDigestForTest(
 	t.Helper()
 	msgType := []byte("TransferWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)")
 	typeHash := crypto.Keccak256(msgType)
-	fromHash := crypto.Keccak256(leftPad32(from.Bytes()))
-	toHash := crypto.Keccak256(leftPad32(to.Bytes()))
-	valueHash := crypto.Keccak256(leftPad32(value.Bytes()))
-	validAfterHash := crypto.Keccak256(leftPad32(validAfter.Bytes()))
-	validBeforeHash := crypto.Keccak256(leftPad32(validBefore.Bytes()))
-	nonceHash := crypto.Keccak256(nonce[:])
-	structHash := crypto.Keccak256(
-		typeHash,
-		fromHash, toHash, valueHash,
-		validAfterHash, validBeforeHash, nonceHash,
-	)
-	// EIP-712 final digest = keccak256(0x19 0x01 || domainSep || structHash)
+	fromBytes := leftPad32(from.Bytes())
+	toBytes := leftPad32(to.Bytes())
+	valueBytes := leftPad32(value.Bytes())
+	validAfterBytes := leftPad32(validAfter.Bytes())
+	validBeforeBytes := leftPad32(validBefore.Bytes())
+	nonceBytes := append([]byte{}, nonce[:]...)
 	return crypto.Keccak256(
-		[]byte{0x19, 0x01},
-		domainSep,
-		structHash,
+		typeHash,
+		fromBytes, toBytes, valueBytes,
+		validAfterBytes, validBeforeBytes, nonceBytes,
 	)
 }
 
