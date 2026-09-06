@@ -409,6 +409,51 @@ func (w *Wallet) RotateKey() (plaintext string, meta KeyMeta, err error) {
 	return plaintext, meta, nil
 }
 
+// RevokeByPrefix deactivates the key whose stored prefix matches.
+// Returns the revoked key's hash on success, or ErrUnknownKey if
+// no active key has that prefix. To revoke ALL active keys, use
+// RotateKey instead.
+//
+// Matching is done against the stored prefix field (the first 8
+// characters of the plaintext). If multiple active keys share the
+// same prefix (vanishingly unlikely with 8 base64url chars of
+// entropy), the oldest is revoked.
+func (w *Wallet) RevokeByPrefix(prefix string) (string, error) {
+	owner, err := w.requireOwner()
+	if err != nil {
+		return "", err
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	var target string
+	var oldestIssued time.Time
+	for h, r := range w.keys {
+		if !r.active {
+			continue
+		}
+		if r.prefix != prefix {
+			continue
+		}
+		if target == "" || r.issuedAt.Before(oldestIssued) {
+			target = h
+			oldestIssued = r.issuedAt
+		}
+	}
+	if target == "" {
+		return "", ErrUnknownKey
+	}
+	r := w.keys[target]
+	r.active = false
+	w.keys[target] = r
+	if err := w.append(Entry{Kind: entryKeyRevoke, Addr: owner, KeyHash: target}); err != nil {
+		// best-effort rollback (so future lookups still work)
+		r.active = true
+		w.keys[target] = r
+		return "", err
+	}
+	return target, nil
+}
+
 // ListKeys returns metadata for all keys ever issued (active and
 // revoked). For the demo this is a small set; production might cap.
 func (w *Wallet) ListKeys() []KeyMeta {

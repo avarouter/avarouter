@@ -86,6 +86,56 @@ func TestWalletKeyRejectsEmpty(t *testing.T) {
 	}
 }
 
+// Multi-key: generate two keys with different prefixes, both should
+// be active. Revoke one by prefix, the other should still work.
+func TestWalletMultiKeyAndRevokeByPrefix(t *testing.T) {
+	w, _ := NewWallet("", "0xABCDEF1234567890ABCDEF1234567890ABCDEF12")
+
+	plainA, metaA, err := w.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	plainB, metaB, err := w.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metaA.Prefix == metaB.Prefix {
+		t.Skipf("prefixes collided (%q); retry — extremely unlikely", metaA.Prefix)
+	}
+	// Both should be active and independently usable.
+	if _, err := w.LookupKey(plainA); err != nil {
+		t.Fatalf("key A should be active: %v", err)
+	}
+	if _, err := w.LookupKey(plainB); err != nil {
+		t.Fatalf("key B should be active: %v", err)
+	}
+
+	// Revoke A by its prefix; B should still work.
+	hash, err := w.RevokeByPrefix(metaA.Prefix)
+	if err != nil {
+		t.Fatalf("RevokeByPrefix: %v", err)
+	}
+	if hash == "" {
+		t.Fatal("RevokeByPrefix returned empty hash")
+	}
+	if _, err := w.LookupKey(plainA); err != ErrUnknownKey {
+		t.Fatalf("key A should be revoked, got err=%v", err)
+	}
+	if _, err := w.LookupKey(plainB); err != nil {
+		t.Fatalf("key B should still be active: %v", err)
+	}
+
+	// Revoking the same prefix again should fail (no active match).
+	if _, err := w.RevokeByPrefix(metaA.Prefix); err != ErrUnknownKey {
+		t.Fatalf("second revoke should fail, got err=%v", err)
+	}
+
+	// A bogus prefix also fails.
+	if _, err := w.RevokeByPrefix("agw_doesntexist"); err != ErrUnknownKey {
+		t.Fatalf("bogus prefix should fail, got err=%v", err)
+	}
+}
+
 func TestWalletListKeys(t *testing.T) {
 	w, _ := NewWallet("", "0xABCDEF1234567890ABCDEF1234567890ABCDEF12")
 	plain1, _, _ := w.GenerateKey()

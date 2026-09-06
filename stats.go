@@ -163,7 +163,12 @@ type statsEntry struct {
 	respBytes int64
 	tokens    tokenUsage
 	cost      float64
-	isError   bool
+	// apiKeyHash is the SHA-256 of the bearer key (empty for
+	// management / non-proxied calls). Used to roll up per-key
+	// usage statistics.
+	apiKeyHash   string
+	apiKeyPrefix string
+	isError      bool
 }
 
 // tokenUsage is the per-request token accounting extracted from upstream
@@ -706,6 +711,8 @@ func updateStatsEntry(entry *statsEntry, request *sessionRequest) {
 		TotalTokens: request.TokenTotal, Seen: request.HasTokenUsage,
 		CacheExcluded: request.TokenCacheExcluded,
 	}
+	entry.apiKeyHash = request.APIKeyHash
+	entry.apiKeyPrefix = request.APIKeyPrefix
 	entry.isError = request.Status >= 400 || errorState(request.State)
 }
 

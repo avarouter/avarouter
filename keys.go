@@ -35,6 +35,48 @@ func (p *Proxy) serveKeys(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// serveKeyByPrefix handles per-key operations keyed by the
+// 8-char prefix (which is what the UI shows operators). Currently
+// supports DELETE for granular revoke, distinct from the global
+// /v1/keys/rotate which kills all keys at once.
+func (p *Proxy) serveKeyByPrefix(w http.ResponseWriter, r *http.Request) {
+	if p.Wallet == nil {
+		http.Error(w, "payments not enabled", http.StatusServiceUnavailable)
+		return
+	}
+	if !p.requireOwnerPayer(w, r) {
+		return
+	}
+	// /v1/keys/{prefix} — strip the prefix
+	prefix := strings.TrimPrefix(r.URL.Path, "/v1/keys/")
+	prefix = strings.TrimSuffix(prefix, "/")
+	if prefix == "" || strings.Contains(prefix, "/") {
+		http.Error(w, "expected /v1/keys/{prefix}", http.StatusBadRequest)
+		return
+	}
+	if r.Method != http.MethodDelete && r.Method != http.MethodPost {
+		http.Error(w, "method not allowed (use DELETE)", http.StatusMethodNotAllowed)
+		return
+	}
+	hash, err := p.Wallet.RevokeByPrefix(prefix)
+	if err != nil {
+		if err == ErrUnknownKey {
+			http.Error(w, "no active key with that prefix", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "revoke failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	p.Logger.Info("api key revoked", "prefix", prefix, "hash", hash[:16])
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":      true,
+		"prefix":  prefix,
+		"hash":    hash,
+		"message": "key revoked; subsequent uses will return 401",
+	})
+}
+
 // serveKeysRotate handles POST /v1/keys/rotate.
 func (p *Proxy) serveKeysRotate(w http.ResponseWriter, r *http.Request) {
 	if p.Wallet == nil {

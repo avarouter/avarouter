@@ -136,6 +136,12 @@ func RunWithOptions(opts Options) error {
 	}
 
 	// Prepaid payment wiring (x402). Activated when PayTo is set.
+	//
+	// Apply env-var fallbacks BEFORE the gate so AGW_PAY_TO etc. work
+	// even when the user didn't pass --pay-to on the CLI.
+	if envApplied := paymentEnv(&opts); len(envApplied) > 0 {
+		logger.Info("payment env-var fallbacks applied", "vars", envApplied)
+	}
 	if opts.PayTo != "" {
 		if err := initPayment(proxy, &opts, logger); err != nil {
 			return err
@@ -260,6 +266,53 @@ func managementCredentials(opts Options) (user, password string, err error) {
 		return "", "", errors.New("AGW_ADMIN_USER and AGW_ADMIN_PASSWORD must be set together")
 	}
 	return user, password, nil
+}
+
+// paymentEnv applies AGW_PAY_TO / AGW_USDC_ADDRESS / AGW_USDC_RPC /
+// AGW_USDC_CHAIN_ID / AGW_USDC_SERVER_KEY / AGW_USDC_SERVER_KEY_PATH
+// environment variables to opts. CLI flags take precedence; the
+// function only fills empty fields. Returns the list of fields
+// that were populated, for logging.
+func paymentEnv(opts *Options) []string {
+	applied := []string{}
+	if opts.PayTo == "" {
+		if v := os.Getenv("AGW_PAY_TO"); v != "" {
+			opts.PayTo = v
+			applied = append(applied, "AGW_PAY_TO")
+		}
+	}
+	if opts.USDCAddress == "" {
+		if v := os.Getenv("AGW_USDC_ADDRESS"); v != "" {
+			opts.USDCAddress = v
+			applied = append(applied, "AGW_USDC_ADDRESS")
+		}
+	}
+	if opts.USDCRPCURL == "" {
+		if v := os.Getenv("AGW_USDC_RPC"); v != "" {
+			opts.USDCRPCURL = v
+			applied = append(applied, "AGW_USDC_RPC")
+		}
+	}
+	if opts.USDCChainID == 0 {
+		if v := os.Getenv("AGW_USDC_CHAIN_ID"); v != "" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+				opts.USDCChainID = n
+				applied = append(applied, "AGW_USDC_CHAIN_ID")
+			}
+		}
+	}
+	if opts.ServerKeyPath == "" {
+		if v := os.Getenv("AGW_USDC_SERVER_KEY"); v != "" {
+			// Inline hex (0x... or 64 raw hex chars) → use as-is,
+			// loadServerKey will decode it. Otherwise treat as path.
+			opts.ServerKeyPath = v
+			applied = append(applied, "AGW_USDC_SERVER_KEY")
+		} else if v := os.Getenv("AGW_USDC_SERVER_KEY_PATH"); v != "" {
+			opts.ServerKeyPath = v
+			applied = append(applied, "AGW_USDC_SERVER_KEY_PATH")
+		}
+	}
+	return applied
 }
 
 func newHTTPClient(timeout time.Duration, transport http.RoundTripper) *http.Client {

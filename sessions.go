@@ -62,6 +62,13 @@ type sessionRequest struct {
 	// chargeFromSession after the response completes.
 	CostMicroUSDC      int64
 	CostUSD            float64
+	// APIKeyHash is the SHA-256 of the bearer key used to authorize
+	// this request (empty for management / non-proxied calls). Used
+	// to roll up per-key usage statistics.
+	APIKeyHash         string
+	// APIKeyPrefix is the 8-char prefix of the plaintext key, kept
+	// for human identification in the stats output.
+	APIKeyPrefix       string
 }
 
 type sessionEvent struct {
@@ -132,6 +139,19 @@ func (t *trackedSession) markProxied() {
 // isProxied reports whether markProxied has been called.
 func (t *trackedSession) isProxied() bool {
 	return t != nil && t.proxied
+}
+
+// setKey identifies the API key that authorized this session. The
+// hash is used to roll up per-key stats; the prefix is for human
+// identification in the UI.
+func (t *trackedSession) setKey(hash, prefix string) {
+	if t == nil || t.hub == nil {
+		return
+	}
+	t.hub.updateRequest(t, func(req *sessionRequest) {
+		req.APIKeyHash = hash
+		req.APIKeyPrefix = prefix
+	})
 }
 
 type sessionCard struct {

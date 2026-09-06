@@ -1186,9 +1186,26 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p.serveKeysRotate(w, r)
 		return
 	}
+	// /v1/keys/{prefix} — granular revoke (DELETE)
+	if strings.HasPrefix(r.URL.Path, "/v1/keys/") {
+		p.serveKeyByPrefix(w, r)
+		return
+	}
 	// Public balance query — open.
 	if r.URL.Path == "/payments/balance" && r.Method == http.MethodGet {
 		p.servePaymentsBalance(w, r)
+		return
+	}
+	// Per-key stats: how much each API key has spent. Owner-only.
+	if r.URL.Path == "/payments/keys" && r.Method == http.MethodGet {
+		if p.Wallet == nil {
+			http.Error(w, "payments not enabled", http.StatusServiceUnavailable)
+			return
+		}
+		if !p.requireOwnerPayer(w, r) {
+			return
+		}
+		p.servePaymentsKeys(w, r)
 		return
 	}
 

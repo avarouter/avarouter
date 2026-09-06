@@ -106,6 +106,11 @@ type PaymentRequirements struct {
 // BuildRequirements returns the 402 body for a topup of `amountMicro`
 // (USDC micro-units) to be paid to `payTo`. The nonce is a random
 // 32-byte value; the client must include it in its signed payload.
+//
+// The validAfter/validBefore window is set to (now-60s, now+maxTimeoutSeconds)
+// so the client signs an authorization that the verifier will actually
+// accept. Without this, the client can sign anything but the server
+// rejects it as "expired" (validBefore=0 in the empty Extra).
 func (u *USDC) BuildRequirements(resource, description, payTo string, amountMicro int64) (PaymentRequirements, [32]byte, error) {
 	if amountMicro <= 0 {
 		return PaymentRequirements{}, [32]byte{}, errors.New("amount must be positive")
@@ -114,6 +119,7 @@ func (u *USDC) BuildRequirements(resource, description, payTo string, amountMicr
 	if err != nil {
 		return PaymentRequirements{}, [32]byte{}, err
 	}
+	now := time.Now().Unix()
 	return PaymentRequirements{
 		X402Version:       2,
 		Scheme:            "exact",
@@ -126,8 +132,10 @@ func (u *USDC) BuildRequirements(resource, description, payTo string, amountMicr
 		MaxTimeoutSeconds: 60,
 		Asset:             u.Address.Hex(),
 		Extra: map[string]string{
-			"name":    USDCDomainName,
-			"version": USDCDomainVersion,
+			"name":        USDCDomainName,
+			"version":     USDCDomainVersion,
+			"validAfter":  fmt.Sprintf("%d", now-60),
+			"validBefore": fmt.Sprintf("%d", now+60),
 		},
 	}, nonce, nil
 }

@@ -13,7 +13,9 @@ import (
 )
 
 func initPayment(proxy *Proxy, opts *Options, logger *slog.Logger) error {
-	// Defaults for Fuji testnet
+	// Defaults for Fuji testnet (only apply if no flag / env override).
+	// env-var application happens in run.go's paymentEnv, before we
+	// get here.
 	if opts.USDCAddress == "" {
 		opts.USDCAddress = DefaultFujiUSDC
 	}
@@ -55,22 +57,11 @@ func initPayment(proxy *Proxy, opts *Options, logger *slog.Logger) error {
 	// Server key (optional — empty = offline mode, accept signatures without settlement)
 	var serverKey *ecdsa.PrivateKey
 	if opts.ServerKeyPath != "" {
-		keyHex, err := os.ReadFile(opts.ServerKeyPath)
+		serverKey, err = loadServerKey(opts.ServerKeyPath)
 		if err != nil {
-			return fmt.Errorf("read server key: %w", err)
+			return fmt.Errorf("server key: %w", err)
 		}
-		keyHexStr := strings.TrimSpace(string(keyHex))
-		keyHexStr = strings.TrimPrefix(keyHexStr, "0x")
-		keyBytes, err := hex.DecodeString(keyHexStr)
-		if err != nil {
-			return fmt.Errorf("decode server key: %w", err)
-		}
-		k, err := ecdsaKeyFromBytes(keyBytes)
-		if err != nil {
-			return fmt.Errorf("parse server key: %w", err)
-		}
-		serverKey = k
-		logger.Info("server key loaded (on-chain settlement enabled)", "path", opts.ServerKeyPath)
+		logger.Info("server key loaded (on-chain settlement enabled)", "source", keySourceLabel(opts.ServerKeyPath))
 	} else {
 		logger.Warn("server key not set — topups accepted by signature only, no on-chain settlement")
 	}
@@ -89,4 +80,31 @@ func initPayment(proxy *Proxy, opts *Options, logger *slog.Logger) error {
 		"onChainSettlement", serverKey != nil,
 	)
 	return nil
+}
+
+// loadServerKey accepts either a 0x-prefixed / raw 64-char hex key, or
+// a path to a file containing it.
+func loadServerKey(spec string) (*ecdsa.PrivateKey, error) {
+	var raw []byte
+	if strings.HasPrefix(spec, "0x") || len(spec) == 64 {
+		h := strings.TrimPrefix(spec, "0x")
+		raw, _ = hex.DecodeString(h)
+	} else {
+		data, err := os.ReadFile(spec)
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", spec, err)
+		}
+		raw, _ = hex.DecodeString(strings.TrimSpace(strings.TrimPrefix(string(data), "0x")))
+	}
+	if len(raw) != 32 {
+		return nil, fmt.Errorf("key must be 32 bytes (got %d)", len(raw))
+	}
+	return ecdsaKeyFromBytes(raw)
+}
+
+func keySourceLabel(spec string) string {
+	if strings.HasPrefix(spec, "0x") || len(spec) == 64 {
+		return "inline"
+	}
+	return "file:" + spec
 }
